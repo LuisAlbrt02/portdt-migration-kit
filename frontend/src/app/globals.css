@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+/* Light theme (default) */
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --port-blue: rgb(31, 41, 55);
+  --sidebar-bg: #1f2937; /* Gray-800 color from Tailwind */
+  --sidebar-text: #f9fafb; /* Gray-50 color from Tailwind */
+  --sidebar-highlight: #3b82f6; /* Blue-500 color from Tailwind */
+  --card-bg: #ffffff;
+  --card-shadow: rgba(0, 0, 0, 0.1);
+  --hover-bg: #f3f4f6;
+  --border-color: #e5e7eb;
+}
+
+/* Dark theme */
+[data-theme='dark'] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --port-blue: #3b82f6;
+  --sidebar-bg: #111827; /* Darker gray for sidebar */
+  --sidebar-text: #f9fafb;
+  --sidebar-highlight: #60a5fa;
+  --card-bg: #1f2937;
+  --card-shadow: rgba(0, 0, 0, 0.3);
+  --hover-bg: #374151;
+  --border-color: #4b5563;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Sidebar styles */
+.sidebar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 10;
+  transition: transform 0.3s ease;
+  color: var(--sidebar-text);
+}
+
+.sidebar.left {
+  left: 0;
+  transform: translateX(-100%); /* Start hidden by default */
+}
+
+.sidebar.right {
+  right: 0;
+  transform: translateX(100%); /* Start hidden by default */
+}
+
+.sidebar.expanded {
+  transform: translateX(0); /* Show when expanded */
+}
+
+.sidebar.collapsed {
+  transform: translateX(-100%);
+}
+
+.sidebar-content {
+  width: 300px;
+  height: 100%;
+  background-color: var(--sidebar-bg);
+  box-shadow: 2px 0 5px rgba(0,0,0,0.2);
+  overflow: auto; /* Changed from scroll to auto for better UX */
+  color: var(--sidebar-text);
+}
+
+.sidebar-toggle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  background-color: var(--sidebar-bg);
+  padding: 5px 10px;
+  box-shadow: 2px 0 5px #0003;
+  border-radius: 30%;
+  color: var(--sidebar-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  font-size: larger;
+}
+
+.sidebar-toggle.left {
+  left: 10px; /* Position toggle button at the edge of the screen */
+}
+
+.sidebar-toggle.right {
+  right: 315px; /* Position toggle button at the edge of the screen */
+}
+
+/* Sidebar-specific styling overrides */
+.sidebar .bg-white {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.sidebar .bg-blue-50 {
+  background-color: rgba(59, 130, 246, 0.2) !important;
+}
+
+.sidebar .bg-gray-50,
+.sidebar .bg-gray-100 {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.sidebar .text-gray-500,
+.sidebar .text-gray-600,
+.sidebar .text-gray-700,
+.sidebar .text-gray-800 {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.sidebar .font-medium,
+.sidebar .font-bold,
+.sidebar .font-semibold {
+  color: var(--sidebar-text) !important;
+}
+
+.sidebar button:hover,
+.sidebar .hover\:bg-gray-100:hover,
+.sidebar button.hover\:bg-gray-100:hover {
+  background-color: rgba(59, 130, 246, 0.3) !important;
+}
+
+.sidebar table {
+  color: var(--sidebar-text);
+}
+
+/* Device selection and details styling */
+.device-selection h3,
+.device-details h3,
+.device-details h4 {
+  color: var(--sidebar-text);
+}
+
+/* Chart.js dark mode compatibility */
+[data-theme='dark'] .chartjs-render-monitor {
+  filter: brightness(0.9);
+}

@@ -1,0 +1,56 @@
+Delete complete directories:
+- dc_power_flow/
+- vessel_modelling/
+- pv_model/
+- backend/src/database/
+
+Delete backend files:
+- backend/src/controllers/converterController.ts
+- backend/src/controllers/pvModelController.ts
+- backend/src/controllers/simulationController.ts
+- backend/src/controllers/vesselController.ts
+- backend/src/routes/converterRoutes.ts
+- backend/src/routes/powerFlowRoutes.ts
+- backend/src/routes/pvModelRoutes.ts
+- backend/src/routes/simulationRoutes.ts
+- backend/src/routes/vesselRoutes.ts
+- backend/src/services/converterDataService.ts
+- backend/src/services/dataMonitorService.ts
+- backend/src/services/databaseService.ts
+- backend/src/services/deviceDataService.ts
+- backend/src/services/emailService.ts
+- backend/src/services/powerFlowStorageService.ts
+- backend/src/services/simulationSchedulerService.ts
+- backend/src/services/socketService.ts
+- backend/src/services/userService.ts
+
+Delete frontend pages:
+- frontend/src/app/simulation/
+- frontend/src/app/converters/
+- frontend/src/app/prediction/
+- frontend/src/app/pv-model/
+- frontend/src/app/vessel/
+
+Delete frontend implementation files tied only to removed features:
+- frontend/src/components/SimulationMonitor.tsx
+- frontend/src/components/PVModelMonitor.tsx
+- frontend/src/components/VesselEnergyProfile.tsx
+- frontend/src/components/VesselInput.tsx
+- frontend/src/components/converters/
+- frontend/src/services/SimulationService.tsx
+- frontend/src/services/ConverterDataService.tsx
+- frontend/src/services/PVModelService.ts
+- frontend/src/services/VesselSimulationService.ts
+- frontend/src/services/DataReceiver.tsx
+- frontend/src/services/DeviceDataHealthMonitor.ts
+- frontend/src/services/DEVICE_DATA_HEALTH_README.md
+- frontend/src/hooks/useConverterData.ts
+- frontend/src/hooks/useDeviceDataHealth.ts
+- frontend/src/components/UI/DeviceDataHealthNotification.tsx
+- frontend/src/components/UI/DeviceDataHealthStatus.tsx
+- frontend/src/components/auth/RegistrationForm.tsx
+- frontend/src/components/auth/EmailVerificationForm.tsx
+
+Review separately before deleting:
+- ais_probe/ (not part of vessel energy prediction; only delete if AIS is no longer wanted)
+- map vessel-specific UI and imports in frontend/src/components/Map/index.tsx and VesselDetailsPopover.tsx
