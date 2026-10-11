@@ -41,7 +41,7 @@ export default function Sidebar() {
     },
     {
       name: t.historicalPortData,
-      href: '/real-time',
+      href: '/historical-data',
       icon: Database,
     },
   ];

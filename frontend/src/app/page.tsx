@@ -20,7 +20,7 @@ export default function Home() {
       title: t.historicalPortData,
       description: t.historicalPortDataDescription,
       icon: Database,
-      href: '/real-time',
+      href: '/historical-data',
     },
   ];
 
