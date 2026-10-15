@@ -205,16 +205,12 @@ export async function getLatestBoatPositions(): Promise<BoatPosition[]> {
         site: siteIds,
         site_type: ['port'],
         device: deviceIds,
-
-        // We are already sending exact boat IDs.
         device_type: ['boat'],
-
         metric_type: [
           latitudeMetricType,
           longitudeMetricType,
         ],
 
-        // Coordinate unit IDs have not been confirmed.
         unit: [],
 
         field: 'default',
