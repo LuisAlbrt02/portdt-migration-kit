@@ -1,3 +1,5 @@
+// frontend/src/lib/auth.ts
+
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ||
   'http://localhost:5001';
@@ -82,7 +84,8 @@ class AuthService {
         headers: {
           'Content-Type':
             'application/json',
-          Accept: 'application/json',
+          Accept:
+            'application/json',
         },
 
         body: JSON.stringify({
@@ -92,11 +95,13 @@ class AuthService {
       }
     );
 
-    const data = await response.json();
+    const data =
+      await response.json();
 
     if (!response.ok) {
       throw new Error(
-        typeof data?.error === 'string'
+        typeof data?.error ===
+          'string'
           ? data.error
           : 'Login failed'
       );
@@ -109,7 +114,8 @@ class AuthService {
     }
 
     const tokenType =
-      data.token_type || 'bearer';
+      data.token_type ||
+      'bearer';
 
     this.setSession(
       data.access_token,
@@ -119,7 +125,8 @@ class AuthService {
     return {
       access_token:
         data.access_token,
-      token_type: tokenType,
+      token_type:
+        tokenType,
     };
   }
 

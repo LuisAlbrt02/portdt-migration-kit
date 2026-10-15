@@ -16,7 +16,7 @@ import {
 import {
   AuthUser,
   authService,
-} from '../services/AuthService';
+} from '../lib/Auth';
 
 type LoginResult = {
   success: boolean;

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import DeviceSelection from '../../components/historical-data/DeviceSelection';
 import DataDisplay from '../../components/historical-data/DataDisplay';
 import { useTranslation } from '../../hooks/useTranslation';
-import { authService } from '../../services/AuthService';
+import { authService } from '../../lib/Auth';
 import type { EnergyData } from '../../types/EnergyData';
 
 type DateRangeType = 'single' | '3days' | 'week' | 'custom';
@@ -379,55 +379,57 @@ export default function HistoricalPortDataPage() {
   };
 
   return (
-    <div className="container mx-auto space-y-9 mt-5 relative z-0">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-        {t.historicalPortEnergyData}
-      </h1>
+    <div className="p-6">
+      <div className="container mx-auto space-y-9 relative z-0">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+          {t.historicalPortEnergyData}
+        </h1>
 
-      {error && (
-        <div className="px-4 py-3 rounded-lg border border-red-200 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300">
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className="px-4 py-3 rounded-lg border border-red-200 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300">
+            {error}
+          </div>
+        )}
 
-      <DeviceSelection
-        deviceList={deviceList}
-        allDeviceList={allDeviceList}
-        selectedDevice={selectedDevice}
-        selectedDate={selectedDate}
-        isSearching={isSearching}
-        handleDeviceSelect={setSelectedDevice}
-        handleDateChange={handleDateChange}
-        fetchHistoricalData={fetchHistoricalData}
-        dateRangeType={dateRangeType}
-        onDateRangeTypeChange={handleDateRangeTypeChange}
-        endDate={endDate}
-        onEndDateChange={event => setEndDate(event.target.value)}
-      />
-
-      {isLoadingMeters ? (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent" />
-          <p className="mt-3 text-gray-600 dark:text-gray-400">
-            {t.loadingData}
-          </p>
-        </div>
-      ) : hasSearched ? (
-        <DataDisplay
-          filteredData={filteredData}
-          deviceList={allDeviceList}
+        <DeviceSelection
+          deviceList={deviceList}
+          allDeviceList={allDeviceList}
           selectedDevice={selectedDevice}
           selectedDate={selectedDate}
-          isHistoricalView
-          isLoading={isSearching}
+          isSearching={isSearching}
+          handleDeviceSelect={setSelectedDevice}
+          handleDateChange={handleDateChange}
+          fetchHistoricalData={fetchHistoricalData}
+          dateRangeType={dateRangeType}
+          onDateRangeTypeChange={handleDateRangeTypeChange}
+          endDate={endDate}
+          onEndDateChange={event => setEndDate(event.target.value)}
         />
-      ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center border border-gray-200 dark:border-gray-700">
-          <p className="text-gray-600 dark:text-gray-400">
-            Select a device and time range, then press Search.
-          </p>
-        </div>
-      )}
+
+        {isLoadingMeters ? (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent" />
+            <p className="mt-3 text-gray-600 dark:text-gray-400">
+              {t.loadingData}
+            </p>
+          </div>
+        ) : hasSearched ? (
+          <DataDisplay
+            filteredData={filteredData}
+            deviceList={allDeviceList}
+            selectedDevice={selectedDevice}
+            selectedDate={selectedDate}
+            isHistoricalView
+            isLoading={isSearching}
+          />
+        ) : (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center border border-gray-200 dark:border-gray-700">
+            <p className="text-gray-600 dark:text-gray-400">
+              Select a device and time range, then press Search.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

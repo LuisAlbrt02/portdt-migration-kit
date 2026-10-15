@@ -30,7 +30,7 @@ import {
 import 'chartjs-adapter-date-fns';
 
 import { useTranslation } from '../hooks/useTranslation';
-import { authService } from '../services/AuthService';
+import { authService } from '../lib/Auth';
 import MetricCard from './dashboard/MetricCard';
 
 ChartJS.register(

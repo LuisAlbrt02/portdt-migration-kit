@@ -10,7 +10,7 @@ export async function getSeriesData(
   req: Request,
   res: Response
 ): Promise<void> {
-  console.log('✅ POST /api/series/data_lake reached');
+  //console.log('✅ POST /api/series/data_lake reached');
 
   const authorization = req.headers.authorization;
 
@@ -35,22 +35,22 @@ export async function getSeriesData(
   }
 
   try {
-    console.log(
-      '➡️ Sending to Atlas:',
-      JSON.stringify(payload, null, 2)
-    );
+    //console.log(
+    //  '➡️ Sending to Atlas:',
+    //  JSON.stringify(payload, null, 2)
+    //);
 
     const data = await getDataLakeSeries(
     authorization,
     payload
     );
 
-    console.log('✅ Atlas series response received');
+    //console.log('✅ Atlas series response received');
 
-    console.log(
-    '⬅️ Atlas response:',
-    JSON.stringify(data, null, 2)
-    );
+    //console.log(
+    //  '⬅️ Atlas response:',
+    //  JSON.stringify(data, null, 2)
+    //);
 
     res.json(data);
 
