@@ -12,6 +12,7 @@
     "@deck.gl/core": "^9.1.4",
     "@deck.gl/layers": "^9.1.4",
     "@deck.gl/maplibre": "^9.4.0",
+    "@deck.gl/mesh-layers": "^9.4.0",
     "@deck.gl/react": "^9.1.4",
     "@react-three/drei": "^9.120.8",
     "@react-three/fiber": "^8.17.12",

@@ -41,7 +41,6 @@ export const PORT_DESTINATIONS = [
   { id: 'fuel-station', name: 'Fuel Station Systems', longitude: -16.9088, latitude: 32.6418 },
 ];
 
-//export const DEFAULT_BOAT_MODEL = '/models/standard/boat.gltf';
 export const EE_TAG_ID = 1;
 export const MAP_HISTORY_HOURS = 6;
 export const ENERGY_REFRESH_MS = 60_000;

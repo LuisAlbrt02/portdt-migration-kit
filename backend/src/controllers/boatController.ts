@@ -22,8 +22,18 @@ export function getBoats(
   const boats =
     getBoatSnapshot();
 
+  const boatsInsidePort =
+    boats.filter(
+      boat =>
+        boat.insidePortZone === true
+    );
+
   console.log(
-    `[BOATS] GET /api/boats -> ${boats.length} boats`
+    `[BOATS] Receiving data from -> ${boats.length} boats`
+  );
+
+  console.log(
+    `[BOATS] Inside port -> ${boatsInsidePort.length} boats`
   );
 
   res.json({
