@@ -466,6 +466,17 @@ export const translations = {
     pause: 'Pause',
     play: 'Play',
 
+    // Vessel map card
+    vessel: 'Vessel',
+    status: 'Status',
+    docked: 'Docked',
+    inPort: 'In Port',
+    outsidePort: 'Outside Port',
+    quay: 'Quay',
+    notAvailable: 'Not available',
+    closeVesselInformation: 'Close vessel information',
+    dateLocale: 'en-GB',
+
     // Map draggable panels
     timeControl: 'Time Control',
     selectedTime: 'Selected time',
@@ -481,6 +492,7 @@ export const translations = {
     basedOn: 'Based on',
     viewEnergyProfile: 'View Energy Profile',
     noDetailedInformationAvailable: 'No detailed information available for this vessel.',
+    // Map
   },
   pt: {
     // Sidebar navigation
@@ -944,6 +956,17 @@ export const translations = {
     autoPlayThroughHistory: 'Reprodução automática através do histórico',
     pause: 'Pausar',
     play: 'Reproduzir',
+
+    // Cartão do navio no mapa
+    vessel: 'Navio',
+    status: 'Estado',
+    docked: 'Atracado',
+    inPort: 'No Porto',
+    outsidePort: 'Fora do Porto',
+    quay: 'Cais',
+    notAvailable: 'Não disponível',
+    closeVesselInformation: 'Fechar informação do navio',
+    dateLocale: 'pt-PT',
 
     // Map draggable panels
     timeControl: 'Controlo de Tempo',

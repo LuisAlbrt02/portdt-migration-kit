@@ -1,6 +1,10 @@
-import type { Layer } from '@deck.gl/core';
+import type { Layer, PickingInfo } from '@deck.gl/core';
 import { ScenegraphLayer } from '@deck.gl/mesh-layers';
-import { TextLayer } from '@deck.gl/layers';
+
+export type BoatStatus =
+  | 'Docked'
+  | 'In Port'
+  | 'Outside Port';
 
 export type BoatMapItem = {
   id: number;
@@ -10,12 +14,20 @@ export type BoatMapItem = {
   timestamp?: string;
   isInsideGeofence?: boolean;
   heading?: number;
+  arrival?: string;
+  status?: BoatStatus;
+  quayId?: string;
+  quayName?: string;
 };
 
 const BOAT_MODEL = '/models/cruise_ship.glb';
 
+const PORT_HEADING = 75;
+const MODEL_ROTATION_OFFSET = 180;
+
 export function createBoatLayers(
-  boats: BoatMapItem[]
+  boats: BoatMapItem[],
+  onBoatClick?: (boat: BoatMapItem) => void
 ): Layer[] {
   const validBoats = boats.filter(
     boat =>
@@ -36,64 +48,49 @@ export function createBoatLayers(
 
     getOrientation: boat => [
       0,
-      -(boat.heading ?? 0),
+      -(boat.heading ?? PORT_HEADING) + MODEL_ROTATION_OFFSET,
       90,
     ],
 
+    // Boat Size
     sizeScale: 0.01,
 
     pickable: true,
+    autoHighlight: true,
+
+    highlightColor: [
+      59,
+      130,
+      246,
+      100,
+    ],
 
     _lighting: 'pbr',
-  });
 
-  const boatLabels = new TextLayer<BoatMapItem>({
-    id: 'boats-labels',
-    data: validBoats,
+    onClick: (
+      info: PickingInfo<BoatMapItem>
+    ) => {
+      if (!info.object) return;
 
-    getPosition: boat => [
-      boat.longitude,
-      boat.latitude,
-      5,
-    ],
+      onBoatClick?.(
+        info.object
+      );
+    },
 
-    getText: boat =>
-      boat.name || `Boat ${boat.id}`,
+    updateTriggers: {
+      getPosition: validBoats.map(
+        boat =>
+          `${boat.id}-${boat.longitude}-${boat.latitude}`
+      ),
 
-    getSize: 13,
-    sizeUnits: 'pixels',
-
-    getColor: () => [
-      17,
-      24,
-      39,
-      255,
-    ],
-
-    getBackgroundColor: () => [
-      255,
-      255,
-      255,
-      220,
-    ],
-
-    background: true,
-
-    getTextAnchor: 'middle',
-    getAlignmentBaseline: 'bottom',
-
-    getPixelOffset: () => [
-      0,
-      -16,
-    ],
-
-    fontFamily: 'Arial, sans-serif',
-
-    pickable: false,
+      getOrientation: validBoats.map(
+        boat =>
+          `${boat.id}-${boat.heading ?? PORT_HEADING}-${MODEL_ROTATION_OFFSET}`
+      ),
+    },
   });
 
   return [
     boatModels,
-    boatLabels,
   ];
 }
