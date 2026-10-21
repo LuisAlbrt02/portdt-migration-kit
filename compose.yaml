@@ -8,8 +8,8 @@ services:
       NODE_ENV: production
       PORT: 5001
       FRONTEND_URL: ${CORS_FRONTEND_URL:-https://funchalportds.feelab.info}
-    ports:
-      - "${BACKEND_PORT:-5002}:5001"
+    expose:
+      - "5001"
     networks:
       shared-proxy:
         aliases:
@@ -35,8 +35,8 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
-    ports:
-      - "${FRONTEND_PORT:-3001}:3000"
+    expose:
+      - "3000"
     networks:
       shared-proxy:
         aliases:
