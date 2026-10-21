@@ -2,8 +2,9 @@ export type QuayZone = {
   id: string;
   name: string;
   coordinates: [number, number][];
-  displayPosition: [number, number];
   displayHeading: number;
+  displayOffsetMeters: number;
+  displayLateralOffsetMeters: number;
 };
 
 export const QUAY_ZONES: QuayZone[] = [
@@ -16,8 +17,9 @@ export const QUAY_ZONES: QuayZone[] = [
       [-16.910863, 32.642707],
       [-16.910766, 32.642101],
     ],
-    displayPosition: [-16.9130005, 32.64206075],
     displayHeading: 79,
+    displayOffsetMeters: 70,
+    displayLateralOffsetMeters: 30,
   },
   {
     id: 'quay-2',
@@ -28,8 +30,9 @@ export const QUAY_ZONES: QuayZone[] = [
       [-16.906990, 32.642662],
       [-16.906928, 32.642091],
     ],
-    displayPosition: [-16.90872575, 32.64237925],
     displayHeading: 90,
+    displayOffsetMeters: 70,
+    displayLateralOffsetMeters: 30,
   },
   {
     id: 'quay-3',
@@ -40,7 +43,8 @@ export const QUAY_ZONES: QuayZone[] = [
       [-16.912576, 32.643643],
       [-16.912919, 32.644004],
     ],
-    displayPosition: [-16.9138635, 32.64312575],
     displayHeading: 53,
+    displayOffsetMeters: 90,
+    displayLateralOffsetMeters: 0,
   },
 ];

@@ -29,7 +29,7 @@ export const translations = {
     
     // Dashboard Page
     
-    welcomeMessage: 'Welcome to the Port Digital Twin platform',
+    welcomeMessage: 'Welcome to the Port Digital Shadow platform',
     portMapDescription: 'Interactive 3D visualization of the port with real-time energy data',
     powerFlowSimulation: 'Power Flow Simulation',
     historicalPortDataDescription: 'View and analyze historical port energy consumption data',
@@ -181,7 +181,7 @@ export const translations = {
     loginFailed: 'Login failed. Please try again.',
     unexpectedError: 'An unexpected error occurred. Please try again.',
     portOfFunchal: 'Port of Funchal',
-    digitalTwinPlatform: 'Digital Twin Platform',
+    digitalTwinPlatform: 'Digital Shadow Platform',
     advancedPortManagement: 'Advanced port management and energy monitoring system for the Port of Funchal. Providing real-time insights and simulation capabilities for efficient port operations.',
     
     // PV Model Monitor
@@ -523,7 +523,7 @@ export const translations = {
     signOutTooltip: 'Terminar sessão',
     
     // Dashboard Page
-    welcomeMessage: 'Bem-vindo à plataforma Port Digital Twin',
+    welcomeMessage: 'Bem-vindo à plataforma Port Digital Shadow',
     portMapDescription: 'Visualização 3D interativa do porto com dados de energia em tempo real',
     powerFlowSimulation: 'Simulação de Fluxo de Energia',
     historicalPortDataDescription: 'Visualizar e analisar dados históricos de consumo energético do porto',
@@ -672,7 +672,7 @@ export const translations = {
     loginFailed: 'Falha no início de sessão. Por favor, tente novamente.',
     unexpectedError: 'Ocorreu um erro inesperado. Por favor, tente novamente.',
     portOfFunchal: 'Porto do Funchal',
-    digitalTwinPlatform: 'Plataforma Digital Twin',
+    digitalTwinPlatform: 'Plataforma Digital Shadow',
     advancedPortManagement: 'Sistema avançado de gestão portuária e monitorização de energia para o Porto do Funchal. Fornecendo insights em tempo real e capacidades de simulação para operações portuárias eficientes.',
     
     // PV Model Monitor

@@ -61,7 +61,7 @@ export default function Sidebar() {
         <Anchor className="h-8 w-8" />
 
         <h1 className="text-xl font-bold">
-          Port Digital Twin
+          Port Digital Shadow
         </h1>
       </div>
 

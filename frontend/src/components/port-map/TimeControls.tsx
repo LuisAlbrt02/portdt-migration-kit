@@ -84,24 +84,9 @@ export default function TimeControls({
     <div
       {...dragHandleProps}
       style={panelStyle}
-      className="
-        absolute
-        right-5
-        top-5
-        z-30
-        w-[430px]
-        max-w-[calc(100%-2.5rem)]
-        cursor-grab
-        select-none
-        overflow-hidden
-        rounded-xl
-        border
-        border-slate-200
-        bg-white/95
-        shadow-xl
-        backdrop-blur
-        active:cursor-grabbing
-      "
+      className="absolute right-5 top-5 z-30 w-[430px] max-w-[calc(100%-2.5rem)] 
+      cursor-grab select-none overflow-hidden rounded-xl border border-slate-200 
+      bg-white/95 shadow-xl backdrop-blur active:cursor-grabbing"
     >
       <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
         <div className="flex items-center gap-2">

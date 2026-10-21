@@ -79,10 +79,6 @@ export function createQuayLayers(
     fontFamily: 'Arial, sans-serif',
     fontWeight: 500,
     pickable: false,
-
-    // IMPORTANTE:
-    // fuerza a Deck.gl a recalcular el texto
-    // cuando cambia el idioma.
     updateTriggers: {
       getText: [labelPrefix],
     },
