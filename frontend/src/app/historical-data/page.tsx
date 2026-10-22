@@ -16,6 +16,7 @@ interface Meter {
   idSite: number;
   name: string;
   tags: number[];
+  extra?: string | { friendlyName?: string } | null;
 }
 
 interface SeriesItem {
@@ -32,9 +33,7 @@ interface SeriesResponse {
   series: SeriesItem[];
 }
 
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
-
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
 const ACTIVE_POWER_UNIT = 12;
 const ACTIVE_POWER_L1 = 6;
 const ACTIVE_POWER_L2 = 7;
@@ -54,11 +53,7 @@ function addDays(date: string, days: number) {
   return value.toISOString().split('T')[0];
 }
 
-function getDateRange(
-  selectedDate: string,
-  endDate: string,
-  type: DateRangeType
-) {
+function getDateRange(selectedDate: string, endDate: string, type: DateRangeType) {
   const today = getToday();
 
   if (type === '3days') {
@@ -119,14 +114,29 @@ function buildHistoricalPayload(
   };
 }
 
-function transformAtlasData(
-  data: SeriesResponse,
-  meters: Meter[]
-): EnergyData[] {
+function getMeterFriendlyName(meter: Meter): string | null {
+  if (!meter.extra) return null;
+
+  try {
+    const extra = typeof meter.extra === 'string'
+      ? JSON.parse(meter.extra)
+      : meter.extra;
+
+    return typeof extra?.friendlyName === 'string' && extra.friendlyName.trim()
+      ? extra.friendlyName.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function transformAtlasData(data: SeriesResponse, meters: Meter[]): EnergyData[] {
   if (!Array.isArray(data.series)) return [];
 
   const rows = new Map<string, EnergyData>();
-  const meterNames = new Map(meters.map(meter => [meter.id, meter.name]));
+  const meterNames = new Map(
+    meters.map(meter => [meter.id, meter.name])
+  );
 
   data.series.forEach(series => {
     if (
@@ -189,13 +199,17 @@ export default function HistoricalPortDataPage() {
   const [selectedDevice, setSelectedDevice] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(getToday());
   const [endDate, setEndDate] = useState(getToday());
-  const [dateRangeType, setDateRangeType] =
-    useState<DateRangeType>('single');
+  const [dateRangeType, setDateRangeType] = useState<DateRangeType>('single');
   const [isLoadingMeters, setIsLoadingMeters] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /*
+   * Lista utilizada por DataDisplay.
+   * Aquí mantenemos únicamente D1, D2, D3...
+   * para que la tabla no cambie.
+   */
   const allDeviceList = useMemo(() => {
     return [...meters]
       .sort((a, b) =>
@@ -210,10 +224,45 @@ export default function HistoricalPortDataPage() {
       }));
   }, [meters]);
 
-  const deviceList = useMemo(() => {
-    const activeIds = new Set(filteredData.map(item => item.device));
-    return allDeviceList.filter(device => activeIds.has(device.id));
-  }, [filteredData, allDeviceList]);
+  /*
+   * Lista específica para el select superior.
+   * Ejemplo:
+   * D1 - Alimentação Q.P.01
+   */
+  const selectDeviceList = useMemo(() => {
+    return [...meters]
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, {
+          numeric: true,
+          sensitivity: 'base',
+        })
+      )
+      .map(meter => {
+        const shortName = meter.name || `Device ${meter.id}`;
+        const friendlyName = getMeterFriendlyName(meter);
+
+        return {
+          id: String(meter.id),
+          name: friendlyName
+            ? `${shortName} - ${friendlyName}`
+            : shortName,
+        };
+      });
+  }, [meters]);
+
+  /*
+   * Determina cuáles de los dispositivos del select
+   * tienen datos en la consulta actual.
+   */
+  const selectActiveDeviceList = useMemo(() => {
+    const activeIds = new Set(
+      filteredData.map(item => item.device)
+    );
+
+    return selectDeviceList.filter(device =>
+      activeIds.has(device.id)
+    );
+  }, [filteredData, selectDeviceList]);
 
   useEffect(() => {
     const loadMeters = async () => {
@@ -251,7 +300,9 @@ export default function HistoricalPortDataPage() {
         setMeters((await response.json()) as Meter[]);
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Failed to load meters';
+          error instanceof Error
+            ? error.message
+            : 'Failed to load meters';
 
         console.error('Historical meters error:', message);
         setError(message);
@@ -260,7 +311,7 @@ export default function HistoricalPortDataPage() {
       }
     };
 
-    loadMeters();
+    void loadMeters();
   }, [router]);
 
   const fetchHistoricalData = async () => {
@@ -278,7 +329,7 @@ export default function HistoricalPortDataPage() {
     if (
       dateRangeType === 'custom' &&
       new Date(`${endDate}T00:00:00Z`) <
-        new Date(`${selectedDate}T00:00:00Z`)
+      new Date(`${selectedDate}T00:00:00Z`)
     ) {
       setError('End date cannot be earlier than start date.');
       return;
@@ -329,7 +380,9 @@ export default function HistoricalPortDataPage() {
 
       if (!response.ok) {
         const body = await response.text();
-        throw new Error(`Historical API ${response.status}: ${body}`);
+        throw new Error(
+          `Historical API ${response.status}: ${body}`
+        );
       }
 
       const data = (await response.json()) as SeriesResponse;
@@ -357,11 +410,23 @@ export default function HistoricalPortDataPage() {
     }
   };
 
+  /*
+   * Ejecuta automáticamente Single Day al cargar la página
+   * y vuelve a consultar cuando cambia el rango temporal.
+   */
+  useEffect(() => {
+    if (!meters.length || isLoadingMeters) return;
+
+    void fetchHistoricalData();
+
+    // fetchHistoricalData intentionally uses the current page state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRangeType, meters.length, isLoadingMeters]);
+
   const handleDateChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const value = event.target.value;
-
     setSelectedDate(value);
 
     if (dateRangeType === 'custom' && endDate < value) {
@@ -369,7 +434,9 @@ export default function HistoricalPortDataPage() {
     }
   };
 
-  const handleDateRangeTypeChange = (type: DateRangeType) => {
+  const handleDateRangeTypeChange = (
+    type: DateRangeType
+  ) => {
     setDateRangeType(type);
 
     if (type === 'custom') {
@@ -392,8 +459,8 @@ export default function HistoricalPortDataPage() {
         )}
 
         <DeviceSelection
-          deviceList={deviceList}
-          allDeviceList={allDeviceList}
+          deviceList={selectActiveDeviceList}
+          allDeviceList={selectDeviceList}
           selectedDevice={selectedDevice}
           selectedDate={selectedDate}
           isSearching={isSearching}
@@ -403,10 +470,12 @@ export default function HistoricalPortDataPage() {
           dateRangeType={dateRangeType}
           onDateRangeTypeChange={handleDateRangeTypeChange}
           endDate={endDate}
-          onEndDateChange={event => setEndDate(event.target.value)}
+          onEndDateChange={event =>
+            setEndDate(event.target.value)
+          }
         />
 
-        {isLoadingMeters ? (
+        {isLoadingMeters || (!hasSearched && isSearching) ? (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent" />
             <p className="mt-3 text-gray-600 dark:text-gray-400">
@@ -425,7 +494,7 @@ export default function HistoricalPortDataPage() {
         ) : (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center border border-gray-200 dark:border-gray-700">
             <p className="text-gray-600 dark:text-gray-400">
-              Select a device and time range, then press Search.
+              {t.loadingData}
             </p>
           </div>
         )}

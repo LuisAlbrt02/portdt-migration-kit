@@ -302,7 +302,12 @@ export const translations = {
     peakPowerLabel: 'Peak Power',
     averagePowerLabel: 'Average Power',
     totalEnergyLabel: 'Total Energy',
-    
+    // Select On Graph
+    selectDevices: 'Select devices',
+    devicesSelected: 'devices selected',
+    selectAll: 'Select all',
+    clear: 'Clear',
+    noDevicesSelected: 'Select at least one device to display data',
     // Data Display
     timestamp: 'Timestamp',
     device: 'Device',
@@ -746,7 +751,13 @@ export const translations = {
     phaseL3: 'Fase L3',
     time: 'Hora',
     hourOfDay: 'Hora do Dia',
-    
+    // Select On Graph
+    selectDevices: 'Selecionar dispositivos',
+    devicesSelected: 'dispositivos selecionados',
+    selectAll: 'Selecionar todos',
+    clear: 'Limpar',
+    noDevicesSelected: 'Selecione pelo menos um dispositivo para visualizar os dados',
+
     // Port Energy Overview
     portEnergyOverview: 'Visão Geral da Energia do Porto',
     timePeriod: 'Período de Tempo',
