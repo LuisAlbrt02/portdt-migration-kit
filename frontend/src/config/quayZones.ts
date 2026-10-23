@@ -9,8 +9,8 @@ export type QuayZone = {
 
 export const QUAY_ZONES: QuayZone[] = [
   {
-    id: 'quay-1',
-    name: 'Cais 1',
+    id: 'quay-2',
+    name: 'Cais 2',
     coordinates: [
       [-16.915101, 32.641469],
       [-16.915272, 32.641966],
@@ -22,8 +22,8 @@ export const QUAY_ZONES: QuayZone[] = [
     displayLateralOffsetMeters: 30,
   },
   {
-    id: 'quay-2',
-    name: 'Cais 2',
+    id: 'quay-3',
+    name: 'Cais 3',
     coordinates: [
       [-16.910455, 32.642111],
       [-16.910530, 32.642653],
@@ -35,8 +35,8 @@ export const QUAY_ZONES: QuayZone[] = [
     displayLateralOffsetMeters: 30,
   },
   {
-    id: 'quay-3',
-    name: 'Cais 3',
+    id: 'quay-6',
+    name: 'Cais 6',
     coordinates: [
       [-16.915151, 32.642631],
       [-16.914808, 32.642225],

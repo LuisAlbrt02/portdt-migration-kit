@@ -73,7 +73,6 @@ export function createQuayLayers(
     getAlignmentBaseline: 'center',
     getAngle: 0,
 
-    // El texto queda fijo respecto al mapa.
     billboard: false,
 
     fontFamily: 'Arial, sans-serif',

@@ -386,9 +386,9 @@ export default function DataDisplay({
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center">
                     <div className="w-2 h-2 bg-blue-500 rounded-full mr-3" />
-
                     <span className="text-base font-medium text-gray-900 dark:text-gray-100">
-                      {item.deviceName ||
+                      {deviceList.find(device => device.id === item.device)?.name ||
+                        item.deviceName ||
                         formatDeviceId(item.device)}
                     </span>
                   </div>

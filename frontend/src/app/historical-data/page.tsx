@@ -218,17 +218,17 @@ export default function HistoricalPortDataPage() {
           sensitivity: 'base',
         })
       )
-      .map(meter => ({
-        id: String(meter.id),
-        name: meter.name || `Device ${meter.id}`,
-      }));
+      .map(meter => {
+        const name = meter.name || `Device ${meter.id}`;
+        const friendlyName = getMeterFriendlyName(meter);
+
+        return {
+          id: String(meter.id),
+          name: friendlyName ? `${name} • ${friendlyName}` : name,
+        };
+      });
   }, [meters]);
 
-  /*
-   * Lista específica para el select superior.
-   * Ejemplo:
-   * D1 - Alimentação Q.P.01
-   */
   const selectDeviceList = useMemo(() => {
     return [...meters]
       .sort((a, b) =>
@@ -250,19 +250,10 @@ export default function HistoricalPortDataPage() {
       });
   }, [meters]);
 
-  /*
-   * Determina cuáles de los dispositivos del select
-   * tienen datos en la consulta actual.
-   */
   const selectActiveDeviceList = useMemo(() => {
-    const activeIds = new Set(
-      filteredData.map(item => item.device)
-    );
-
-    return selectDeviceList.filter(device =>
-      activeIds.has(device.id)
-    );
-  }, [filteredData, selectDeviceList]);
+    const activeIds = new Set(filteredData.map(item => item.device));
+    return allDeviceList.filter(device => activeIds.has(device.id));
+  }, [filteredData, allDeviceList]);
 
   useEffect(() => {
     const loadMeters = async () => {
@@ -460,7 +451,7 @@ export default function HistoricalPortDataPage() {
 
         <DeviceSelection
           deviceList={selectActiveDeviceList}
-          allDeviceList={selectDeviceList}
+          allDeviceList={allDeviceList}
           selectedDevice={selectedDevice}
           selectedDate={selectedDate}
           isSearching={isSearching}

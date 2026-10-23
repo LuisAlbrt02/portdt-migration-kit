@@ -26,7 +26,7 @@ export default function Home() {
 
   return (
     <div className="p-6">
-      {/* Dashboard title */}
+      {/* Dashboard title 
       <div className="mb-6 mt-3">
         <h1 className="text-4xl font-bold text-gray-800 dark:text-gray-200">
           {t.dashboard}
@@ -36,8 +36,8 @@ export default function Home() {
           {t.welcomeMessage}
         </p>
       </div>
-
-      {/* Navigation cards */}
+      */}
+      {/*
       <div className="max-w-2xl mx-auto">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {cards.map((card) => {
@@ -85,9 +85,9 @@ export default function Home() {
           })}
         </div>
       </div>
-
+      */}
       {/* Port Energy Overview */}
-      <div className="mt-10">
+      <div className="">
         <PortEnergyOverview />
       </div>
     </div>

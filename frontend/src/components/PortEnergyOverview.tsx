@@ -90,16 +90,21 @@ const LIVE_DATA_MAX_AGE_MINUTES = 3;
 function getMeterDisplayName(meter?: Meter, deviceId?: number): string {
   if (!meter) return deviceId !== undefined ? `Device ${deviceId}` : 'Unknown device';
 
+  const baseName = meter.name || `Device ${meter.id}`;
+
   if (meter.extra) {
     try {
       const extra = typeof meter.extra === 'string' ? JSON.parse(meter.extra) : meter.extra;
-      if (typeof extra?.friendlyName === 'string' && extra.friendlyName.trim()) return extra.friendlyName.trim();
+
+      if (typeof extra?.friendlyName === 'string' && extra.friendlyName.trim()) {
+        return `${baseName} • ${extra.friendlyName.trim()}`;
+      }
     } catch {
       console.warn(`Could not parse extra for meter ${meter.id}`);
     }
   }
 
-  return meter.name || `Device ${meter.id}`;
+  return baseName;
 }
 
 function getTimePeriodMinutes(period: TimePeriod): number {
