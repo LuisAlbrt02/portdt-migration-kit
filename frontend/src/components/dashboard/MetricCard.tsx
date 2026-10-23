@@ -69,24 +69,18 @@ export default function MetricCard({
   const style = variants[variant];
 
   return (
-    <div className={`rounded-lg border p-4 ${style.container}`}>
+    <div className={`rounded-lg border p-2 ${style.container}`}>
       <div className="flex items-center">
         <Icon className={`h-8 w-8 ${style.icon}`} />
 
         <div className="ml-3">
-          <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
+          <p className="text-base font-medium text-gray-600 dark:text-gray-300">
             {title}
           </p>
 
-          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {loading ? '...' : value}
+          <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+            {loading ? '...' : value} {unit}
           </p>
-
-          {unit && !error && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {unit}
-            </p>
-          )}
 
           {error && (
             <p className="mt-1 text-xs text-red-500">

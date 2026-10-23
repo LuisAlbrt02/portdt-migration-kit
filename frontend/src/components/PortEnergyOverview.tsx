@@ -90,21 +90,16 @@ const LIVE_DATA_MAX_AGE_MINUTES = 3;
 function getMeterDisplayName(meter?: Meter, deviceId?: number): string {
   if (!meter) return deviceId !== undefined ? `Device ${deviceId}` : 'Unknown device';
 
-  const baseName = meter.name || `Device ${meter.id}`;
-
   if (meter.extra) {
     try {
       const extra = typeof meter.extra === 'string' ? JSON.parse(meter.extra) : meter.extra;
-
-      if (typeof extra?.friendlyName === 'string' && extra.friendlyName.trim()) {
-        return `${baseName} • ${extra.friendlyName.trim()}`;
-      }
+      if (typeof extra?.friendlyName === 'string' && extra.friendlyName.trim()) return extra.friendlyName.trim();
     } catch {
       console.warn(`Could not parse extra for meter ${meter.id}`);
     }
   }
 
-  return baseName;
+  return meter.name || `Device ${meter.id}`;
 }
 
 function getTimePeriodMinutes(period: TimePeriod): number {
@@ -962,7 +957,7 @@ export default function PortEnergyOverview() {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-2">
         <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-200">
           {t.portEnergyOverview}
         </h2>
@@ -986,7 +981,7 @@ export default function PortEnergyOverview() {
       </div>
 
       {/* Current Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
         <MetricCard
           title={t.totalDevicesLabel}
           value={values.totalDevices}
@@ -1017,9 +1012,9 @@ export default function PortEnergyOverview() {
       </div>
 
       {/* Time Period */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700 mb-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 border border-gray-200 dark:border-gray-700 mb-6">
         <label className="flex items-center text-base font-semibold text-gray-700 dark:text-gray-300 mb-3">
-          <Clock className="w-4 h-4 mr-2 text-blue-600 dark:text-blue-400" />
+          <Clock className="w-5 h-5 mr-2 text-blue-600 dark:text-blue-400" />
           {t.timePeriod}
         </label>
 
@@ -1029,7 +1024,7 @@ export default function PortEnergyOverview() {
               key={option.value}
               onClick={() => setTimePeriod(option.value)}
               disabled={loading.periodAnalytics}
-              className={`px-4 py-3 rounded-lg font-medium transition-all duration-200 border-2 ${
+              className={`px-3 py-2 rounded-lg font-medium transition-all duration-200 border-2 ${
                 timePeriod === option.value
                   ? 'bg-blue-600 text-white border-blue-600 shadow-md'
                   : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:border-blue-600 hover:shadow-sm'
@@ -1145,7 +1140,7 @@ export default function PortEnergyOverview() {
         <MetricCard
           title={t.monthlyEnergyLabel}
           value={analytics.monthlyEnergy.toLocaleString()}
-          unit={`${t.kWh} (${t.last30Days})`}
+          unit={`${t.kWh}`}
           icon={Zap}
           variant="indigo"
           loading={loading.monthlyEnergy}
@@ -1155,7 +1150,7 @@ export default function PortEnergyOverview() {
         <MetricCard
           title={t.maxPowerLabel}
           value={analytics.maxPower}
-          unit={`${t.kW} (${getTimePeriodLabel(timePeriod)})`}
+          unit={`${t.kW}`}
           icon={TrendingUp}
           variant="rose"
           loading={loading.periodAnalytics}
@@ -1165,7 +1160,7 @@ export default function PortEnergyOverview() {
         <MetricCard
           title={t.topConsumerLabel}
           value={analytics.topConsumerName}
-          unit={`${analytics.topConsumerPercentage}% (${getTimePeriodLabel(timePeriod)})`}
+          unit={`- ${analytics.topConsumerPercentage}%`}
           icon={PieChart}
           variant="amber"
           loading={loading.periodAnalytics}
