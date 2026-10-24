@@ -18,6 +18,7 @@ import type { EnergyData } from '../../types/EnergyData';
 interface Meter {
   id: number;
   name: string;
+  extra?: string | { friendlyName?: string } | null;
 }
 
 interface Props {
@@ -27,6 +28,30 @@ interface Props {
   activeDeviceIds: Set<number>;
   isLoading: boolean;
   onDeviceChange: (deviceId: number) => void;
+}
+
+function getMeterFriendlyName(meter?: Meter): string {
+  if (!meter) return '';
+
+  if (meter.extra) {
+    try {
+      const extra =
+        typeof meter.extra === 'string'
+          ? JSON.parse(meter.extra)
+          : meter.extra;
+
+      if (
+        typeof extra?.friendlyName === 'string' &&
+        extra.friendlyName.trim()
+      ) {
+        return extra.friendlyName.trim();
+      }
+    } catch {
+      console.warn(`Could not parse extra for meter ${meter.id}`);
+    }
+  }
+
+  return meter.name;
 }
 
 function formatPower(value: number): string {
@@ -42,7 +67,6 @@ export default function MapSensorPanel({
   onDeviceChange,
 }: Props) {
   const t = useTranslation();
-
   const [minimized, setMinimized] = useState(false);
 
   const {
@@ -53,7 +77,7 @@ export default function MapSensorPanel({
   const currentIndex = Math.max(
     0,
     meters.findIndex(
-      (meter) =>
+      meter =>
         meter.id === selectedDeviceId
     )
   );
@@ -132,7 +156,7 @@ export default function MapSensorPanel({
               type="button"
               onClick={() =>
                 setMinimized(
-                  (value) => !value
+                  value => !value
                 )
               }
               className="
@@ -188,12 +212,11 @@ export default function MapSensorPanel({
             </button>
 
             <span className="max-w-[185px] truncate text-lg font-bold">
-              {selectedMeter?.name ||
-                (
-                  isLoading
-                    ? t.loadingData
-                    : t.noDataAvailable
-                )}
+              {selectedMeter
+                ? getMeterFriendlyName(selectedMeter)
+                : isLoading
+                  ? t.loadingData
+                  : t.noDataAvailable}
             </span>
 
             <button

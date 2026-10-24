@@ -1,4 +1,10 @@
-export type BoatZoneStatus = 'outside' | 'entering' | 'inside' | 'leaving' | 'stale';
+
+export type BoatZoneStatus =
+  | 'outside'
+  | 'entering'
+  | 'inside'
+  | 'leaving'
+  | 'stale';
 
 export interface Boat {
   deviceId: number;
@@ -8,6 +14,7 @@ export interface Boat {
   latitude: number;
   longitude: number;
   timestamp: string;
+  length: number | null;
   status: BoatZoneStatus;
   insidePortZone: boolean;
   positionFresh: boolean;

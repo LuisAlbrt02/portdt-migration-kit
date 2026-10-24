@@ -22,25 +22,6 @@ export const PORT_CENTER = {
   latitude: 32.64184038298506,
 };
 
-export const PORT_LOCATIONS = [
-  {
-    id: 'main-dock',
-    name: 'Main Dock',
-    longitude: -16.910284,
-    latitude: 32.641901,
-    elevation: 0,
-  },
-];
-
-export const PORT_DESTINATIONS = [
-  { id: 'main-dock', name: 'Main Dock Energy Grid', longitude: -16.910284, latitude: 32.641901 },
-  { id: 'crane-1', name: 'Port Crane System', longitude: -16.911741, latitude: 32.641808 },
-  { id: 'shore-power', name: 'Shore Power Connection', longitude: -16.9094, latitude: 32.642 },
-  { id: 'lighting-south', name: 'Port Lighting Grid', longitude: -16.914402, latitude: 32.641184 },
-  { id: 'administrative', name: 'Administrative Buildings', longitude: -16.911058, latitude: 32.641813 },
-  { id: 'fuel-station', name: 'Fuel Station Systems', longitude: -16.9088, latitude: 32.6418 },
-];
-
 export const EE_TAG_ID = 1;
 export const MAP_HISTORY_HOURS = 6;
 export const ENERGY_REFRESH_MS = 60_000;

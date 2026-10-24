@@ -1,3 +1,4 @@
+
 export interface BoatDevice {
   id: number;
   enabled: boolean;
@@ -5,6 +6,7 @@ export interface BoatDevice {
   idSite: number;
   name: string;
   remote_id?: string | null;
+  extra?: string | null;
 }
 
 export interface BoatPosition {
@@ -15,6 +17,7 @@ export interface BoatPosition {
   latitude: number;
   longitude: number;
   timestamp: string;
+  length: number | null;
 }
 
 export type BoatZoneStatus =

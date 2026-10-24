@@ -65,6 +65,7 @@ interface SeriesResponse {
   data?: SeriesItem[];
 }
 
+
 interface BoatApiMapData {
   id?: number | string;
   deviceId?: number | string;
@@ -72,11 +73,13 @@ interface BoatApiMapData {
   name?: string;
   latitude?: number | string | null;
   longitude?: number | string | null;
+  length?: number | null;
   timestamp?: string;
   lastPositionAt?: string;
   insidePortZone?: boolean;
   isInsideGeofence?: boolean;
 }
+
 
 interface CoordinateSample {
   time: number;
@@ -354,35 +357,43 @@ function findDataAtTime(
   );
 }
 
+
 function mapBoatForDisplay(
   boat: Boat
 ): BoatMapItem | null {
   const raw =
     boat as unknown as BoatApiMapData;
 
-  const id =
-    Number(
-      raw.deviceId ??
-      raw.device ??
-      raw.id
-    );
+  const id = Number(
+    raw.deviceId ??
+    raw.device ??
+    raw.id
+  );
 
   if (
     raw.latitude == null ||
     raw.longitude == null
-  ) return null;
+  ) {
+    return null;
+  }
 
-  const latitude =
-    Number(raw.latitude);
-
-  const longitude =
-    Number(raw.longitude);
+  const latitude = Number(raw.latitude);
+  const longitude = Number(raw.longitude);
 
   if (
     !Number.isFinite(id) ||
     !Number.isFinite(latitude) ||
     !Number.isFinite(longitude)
-  ) return null;
+  ) {
+    return null;
+  }
+
+  const length =
+    typeof raw.length === 'number' &&
+    Number.isFinite(raw.length) &&
+    raw.length > 0
+      ? raw.length
+      : null;
 
   return {
     id,
@@ -391,6 +402,7 @@ function mapBoatForDisplay(
       `Boat ${id}`,
     latitude,
     longitude,
+    length,
     timestamp:
       raw.timestamp ||
       raw.lastPositionAt,
@@ -400,6 +412,7 @@ function mapBoatForDisplay(
       false,
   };
 }
+
 
 function calculateHeading(
   latitude1: number,
@@ -1192,41 +1205,35 @@ function getHistoricalBoats(
           ? quay.displayHeading
           : heading;
 
+      
       boats.push({
-        id:
-          deviceId,
+        id: deviceId,
 
         name:
-          currentMetadata
-            ?.name ||
+          currentMetadata?.name ||
           `Boat ${deviceId}`,
 
-        latitude:
-          displayLatitude,
+        // Reuse vessel metadata from the live API
+        length: currentMetadata?.length ?? null,
 
-        longitude:
-          displayLongitude,
+        latitude: displayLatitude,
+        longitude: displayLongitude,
 
-        heading:
-          displayHeading,
+        heading: displayHeading,
 
-        timestamp:
-          selectedTime.toISOString(),
+        timestamp: selectedTime.toISOString(),
 
         status,
 
         isInsideGeofence:
-          status !==
-          'Outside Port',
+          status !== 'Outside Port',
 
-        quayId:
-          quay?.id,
-
-        quayName:
-          quay?.name,
+        quayId: quay?.id,
+        quayName: quay?.name,
 
         arrival,
       });
+
     }
   );
 

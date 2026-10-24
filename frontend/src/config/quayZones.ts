@@ -9,6 +9,19 @@ export type QuayZone = {
 
 export const QUAY_ZONES: QuayZone[] = [
   {
+    id: 'quay-1',
+    name: 'Cais 1',
+    coordinates: [
+      [-16.916641, 32.641257],
+      [-16.916709, 32.641679],
+      [-16.915425, 32.641765],
+      [-16.915383, 32.641367],
+    ],
+    displayHeading: 84,
+    displayOffsetMeters: 90,
+    displayLateralOffsetMeters: 15,
+  },
+  {
     id: 'quay-2',
     name: 'Cais 2',
     coordinates: [

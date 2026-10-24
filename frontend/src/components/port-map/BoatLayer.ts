@@ -1,5 +1,19 @@
-import type { Layer, PickingInfo } from '@deck.gl/core';
-import { ScenegraphLayer } from '@deck.gl/mesh-layers';
+
+import type {
+  Layer,
+  PickingInfo,
+} from '@deck.gl/core';
+
+import {
+  ScenegraphLayer,
+} from '@deck.gl/mesh-layers';
+
+import {
+  BOAT_MODELS,
+  getBoatScale,
+  getBoatVisualType,
+  type BoatVisualType,
+} from '../../config/boatVisuals';
 
 export type BoatStatus =
   | 'Docked'
@@ -11,6 +25,7 @@ export type BoatMapItem = {
   name: string;
   longitude: number;
   latitude: number;
+  length?: number | null;
   timestamp?: string;
   isInsideGeofence?: boolean;
   heading?: number;
@@ -20,10 +35,14 @@ export type BoatMapItem = {
   quayName?: string;
 };
 
-const BOAT_MODEL = '/models/cruise_ship.glb';
-
 const PORT_HEADING = 75;
 const MODEL_ROTATION_OFFSET = 180;
+
+const MODEL_TYPES: BoatVisualType[] = [
+  'ferry',
+  'sail',
+  'cruise',
+];
 
 export function createBoatLayers(
   boats: BoatMapItem[],
@@ -35,62 +54,81 @@ export function createBoatLayers(
       Number.isFinite(boat.latitude)
   );
 
-  const boatModels = new ScenegraphLayer<BoatMapItem>({
-    id: 'boats-3d',
-    data: validBoats,
-    scenegraph: BOAT_MODEL,
+  return MODEL_TYPES.map(type => {
+    const modelBoats = validBoats.filter(
+      boat =>
+        getBoatVisualType(boat.name) === type
+    );
 
-    getPosition: boat => [
-      boat.longitude,
-      boat.latitude,
-      2,
-    ],
+    return new ScenegraphLayer<BoatMapItem>({
+      id: `boats-3d-${type}`,
 
-    getOrientation: boat => [
-      0,
-      -(boat.heading ?? PORT_HEADING) + MODEL_ROTATION_OFFSET,
-      90,
-    ],
+      data: modelBoats,
 
-    // Boat Size
-    sizeScale: 0.01,
+      scenegraph: BOAT_MODELS[type],
 
-    pickable: true,
-    autoHighlight: true,
+      getPosition: boat => [
+        boat.longitude,
+        boat.latitude,
+        2,
+      ],
 
-    highlightColor: [
-      59,
-      130,
-      246,
-      100,
-    ],
+      getOrientation: boat => [
+        0,
+        -(boat.heading ?? PORT_HEADING) +
+          MODEL_ROTATION_OFFSET,
+        90,
+      ],
 
-    _lighting: 'pbr',
+      getScale: boat => {
+        const scale = getBoatScale(
+          boat.name,
+          boat.length
+        );
 
-    onClick: (
-      info: PickingInfo<BoatMapItem>
-    ) => {
-      if (!info.object) return;
+        return [scale, scale, scale];
+      },
 
-      onBoatClick?.(
-        info.object
-      );
-    },
+      sizeScale: 1,
 
-    updateTriggers: {
-      getPosition: validBoats.map(
-        boat =>
-          `${boat.id}-${boat.longitude}-${boat.latitude}`
-      ),
+      pickable: true,
+      autoHighlight: true,
 
-      getOrientation: validBoats.map(
-        boat =>
-          `${boat.id}-${boat.heading ?? PORT_HEADING}-${MODEL_ROTATION_OFFSET}`
-      ),
-    },
+      highlightColor: [
+        59,
+        130,
+        246,
+        100,
+      ],
+
+      _lighting: 'pbr',
+
+      onClick: (
+        info: PickingInfo<BoatMapItem>
+      ) => {
+        if (!info.object) {
+          return;
+        }
+
+        onBoatClick?.(info.object);
+      },
+
+      updateTriggers: {
+        getPosition: modelBoats.map(
+          boat =>
+            `${boat.id}-${boat.longitude}-${boat.latitude}`
+        ),
+
+        getOrientation: modelBoats.map(
+          boat =>
+            `${boat.id}-${boat.heading ?? PORT_HEADING}-${MODEL_ROTATION_OFFSET}`
+        ),
+
+        getScale: modelBoats.map(
+          boat =>
+            `${boat.id}-${boat.name}-${boat.length ?? 'unknown'}`
+        ),
+      },
+    });
   });
-
-  return [
-    boatModels,
-  ];
 }

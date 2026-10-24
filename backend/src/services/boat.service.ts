@@ -1,3 +1,4 @@
+
 import axios from 'axios';
 
 import apiClient from './apiClient';
@@ -72,7 +73,9 @@ async function withServiceAuthorization<T>(
   }
 }
 
-function extractSeriesItems(payload: unknown): AtlasSeriesItem[] {
+function extractSeriesItems(
+  payload: unknown
+): AtlasSeriesItem[] {
   if (Array.isArray(payload)) {
     return payload as AtlasSeriesItem[];
   }
@@ -95,12 +98,16 @@ function extractSeriesItems(payload: unknown): AtlasSeriesItem[] {
   return [];
 }
 
-function extractBoatDevices(payload: unknown): BoatDevice[] {
+function extractBoatDevices(
+  payload: unknown
+): BoatDevice[] {
   const rawItems = Array.isArray(payload)
     ? payload
     : payload &&
         typeof payload === 'object' &&
-        Array.isArray((payload as { data?: unknown[] }).data)
+        Array.isArray(
+          (payload as { data?: unknown[] }).data
+        )
       ? (payload as { data: unknown[] }).data
       : [];
 
@@ -124,19 +131,55 @@ function extractBoatDevices(payload: unknown): BoatDevice[] {
     );
 }
 
+function extractBoatLength(
+  extra?: string | null
+): number | null {
+  if (!extra) {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(extra);
+
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      !('length' in parsed)
+    ) {
+      return null;
+    }
+
+    const length = parsed.length;
+
+    if (
+      typeof length !== 'number' ||
+      !Number.isFinite(length) ||
+      length <= 0
+    ) {
+      return null;
+    }
+
+    return length;
+  } catch {
+    return null;
+  }
+}
+
 export async function getBoatDevices(): Promise<BoatDevice[]> {
   const path = requireEnv('DATALAKE_BOATS_PATH');
 
-  return withServiceAuthorization(async (authorization) => {
-    const response = await apiClient.get(path, {
-      headers: {
-        Authorization: authorization,
-        Accept: 'application/json',
-      },
-    });
+  return withServiceAuthorization(
+    async (authorization) => {
+      const response = await apiClient.get(path, {
+        headers: {
+          Authorization: authorization,
+          Accept: 'application/json',
+        },
+      });
 
-    return extractBoatDevices(response.data);
-  });
+      return extractBoatDevices(response.data);
+    }
+  );
 }
 
 type LatestMetric = {
@@ -163,7 +206,9 @@ function keepNewest(
     : current;
 }
 
-export async function getLatestBoatPositions(): Promise<BoatPosition[]> {
+export async function getLatestBoatPositions(): Promise<
+  BoatPosition[]
+> {
   const boats = await getBoatDevices();
 
   if (boats.length === 0) {
@@ -210,9 +255,7 @@ export async function getLatestBoatPositions(): Promise<BoatPosition[]> {
           latitudeMetricType,
           longitudeMetricType,
         ],
-
         unit: [],
-
         field: 'default',
       },
     ],
@@ -238,7 +281,10 @@ export async function getLatestBoatPositions(): Promise<BoatPosition[]> {
 
   for (const series of extractSeriesItems(response.data)) {
     for (const rawRecord of series.records || []) {
-      if (!Array.isArray(rawRecord) || rawRecord.length < 5) {
+      if (
+        !Array.isArray(rawRecord) ||
+        rawRecord.length < 5
+      ) {
         continue;
       }
 
@@ -333,6 +379,7 @@ export async function getLatestBoatPositions(): Promise<BoatPosition[]> {
         latitudeTime >= longitudeTime
           ? coordinates.latitude.timestamp
           : coordinates.longitude.timestamp,
+      length: extractBoatLength(boat.extra),
     });
   }
 
