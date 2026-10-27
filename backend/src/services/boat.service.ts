@@ -8,6 +8,7 @@ import type {
   AtlasSeriesItem,
   BoatDevice,
   BoatPosition,
+  BoatType,
 } from '../types/boat';
 
 let serviceAuthorization: string | null = null;
@@ -131,11 +132,20 @@ function extractBoatDevices(
     );
 }
 
-function extractBoatLength(
+
+function extractBoatMetadata(
   extra?: string | null
-): number | null {
+): {
+  length: number | null;
+  boatType: BoatType | null;
+} {
+  const fallback = {
+    length: null,
+    boatType: null,
+  };
+
   if (!extra) {
-    return null;
+    return fallback;
   }
 
   try {
@@ -144,26 +154,42 @@ function extractBoatLength(
     if (
       !parsed ||
       typeof parsed !== 'object' ||
-      !('length' in parsed)
+      Array.isArray(parsed)
     ) {
-      return null;
+      return fallback;
     }
 
-    const length = parsed.length;
+    const metadata = parsed as Record<string, unknown>;
 
-    if (
-      typeof length !== 'number' ||
-      !Number.isFinite(length) ||
-      length <= 0
-    ) {
-      return null;
-    }
+    const length =
+      typeof metadata.length === 'number' &&
+      Number.isFinite(metadata.length) &&
+      metadata.length > 0
+        ? metadata.length
+        : null;
 
-    return length;
+    const validTypes: BoatType[] = [
+      'ferry',
+      'sailing_ship',
+      'cruise_ship',
+      'yacht',
+    ];
+
+    const boatType =
+      typeof metadata.type === 'string' &&
+      validTypes.includes(metadata.type as BoatType)
+        ? (metadata.type as BoatType)
+        : null;
+
+    return {
+      length,
+      boatType,
+    };
   } catch {
-    return null;
+    return fallback;
   }
 }
+
 
 export async function getBoatDevices(): Promise<BoatDevice[]> {
   const path = requireEnv('DATALAKE_BOATS_PATH');
@@ -368,6 +394,9 @@ export async function getLatestBoatPositions(): Promise<
       continue;
     }
 
+    
+const metadata = extractBoatMetadata(boat.extra);
+
     result.push({
       deviceId: boat.id,
       name: boat.name,
@@ -379,8 +408,10 @@ export async function getLatestBoatPositions(): Promise<
         latitudeTime >= longitudeTime
           ? coordinates.latitude.timestamp
           : coordinates.longitude.timestamp,
-      length: extractBoatLength(boat.extra),
+      length: metadata.length,
+      boatType: metadata.boatType,
     });
+
   }
 
   return result;

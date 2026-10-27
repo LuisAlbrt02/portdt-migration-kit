@@ -26,6 +26,7 @@ export type BoatMapItem = {
   longitude: number;
   latitude: number;
   length?: number | null;
+  boatType?: BoatVisualType | null;
   timestamp?: string;
   isInsideGeofence?: boolean;
   heading?: number;
@@ -40,8 +41,9 @@ const MODEL_ROTATION_OFFSET = 180;
 
 const MODEL_TYPES: BoatVisualType[] = [
   'ferry',
-  'sail',
-  'cruise',
+  'sailing_ship',
+  'cruise_ship',
+  'yacht',
 ];
 
 export function createBoatLayers(
@@ -54,10 +56,20 @@ export function createBoatLayers(
       Number.isFinite(boat.latitude)
   );
 
+    // DEBUG: Check boat types received from the API
+  console.table(
+    validBoats.map(boat => ({
+      id: boat.id,
+      name: boat.name,
+      boatType: boat.boatType,
+      length: boat.length,
+    }))
+  );
+
   return MODEL_TYPES.map(type => {
     const modelBoats = validBoats.filter(
       boat =>
-        getBoatVisualType(boat.name) === type
+        getBoatVisualType(boat.boatType) === type
     );
 
     return new ScenegraphLayer<BoatMapItem>({
@@ -82,7 +94,7 @@ export function createBoatLayers(
 
       getScale: boat => {
         const scale = getBoatScale(
-          boat.name,
+          boat.boatType,
           boat.length
         );
 
@@ -126,7 +138,7 @@ export function createBoatLayers(
 
         getScale: modelBoats.map(
           boat =>
-            `${boat.id}-${boat.name}-${boat.length ?? 'unknown'}`
+            `${boat.id}-${boat.boatType ?? 'unknown'}-${boat.length ?? 'unknown'}`
         ),
       },
     });

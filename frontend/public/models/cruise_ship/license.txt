@@ -1,0 +1,11 @@
+Model Information:
+* title:	cruise_ship
+* source:	https://sketchfab.com/3d-models/cruise-ship-bfda95d9bb384c2497565eb3566023cf
+* author:	ap-school (https://sketchfab.com/ap-school)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "cruise_ship" (https://sketchfab.com/3d-models/cruise-ship-bfda95d9bb384c2497565eb3566023cf) by ap-school (https://sketchfab.com/ap-school) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

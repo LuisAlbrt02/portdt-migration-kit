@@ -1,4 +1,10 @@
 
+export type BoatType =
+  | 'ferry'
+  | 'sailing_ship'
+  | 'cruise_ship'
+  | 'yacht';
+
 export type BoatZoneStatus =
   | 'outside'
   | 'entering'
@@ -15,6 +21,7 @@ export interface Boat {
   longitude: number;
   timestamp: string;
   length: number | null;
+  boatType: BoatType | null;
   status: BoatZoneStatus;
   insidePortZone: boolean;
   positionFresh: boolean;

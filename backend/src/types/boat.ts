@@ -1,4 +1,10 @@
 
+export type BoatType =
+  | 'ferry'
+  | 'sailing_ship'
+  | 'cruise_ship'
+  | 'yacht';
+
 export interface BoatDevice {
   id: number;
   enabled: boolean;
@@ -18,6 +24,7 @@ export interface BoatPosition {
   longitude: number;
   timestamp: string;
   length: number | null;
+  boatType: BoatType | null;
 }
 
 export type BoatZoneStatus =
