@@ -13,7 +13,7 @@ export const BOAT_MODELS: Record<BoatVisualType, string> = {
 };
 
 // Fixed scales for special boat types
-const FERRY_SCALE = 0.007;
+const FERRY_SCALE = 0.005;
 const SAIL_SCALE = 0.003;
 const YACHT_SCALE = 0.003;
 

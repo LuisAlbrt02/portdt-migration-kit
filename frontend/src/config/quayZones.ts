@@ -3,8 +3,8 @@ export type QuayZone = {
   name: string;
   coordinates: [number, number][];
   displayHeading: number;
-  displayOffsetMeters: number;
-  displayLateralOffsetMeters: number;
+  displayLongitude: number;
+  displayLatitude: number;
 };
 
 export const QUAY_ZONES: QuayZone[] = [
@@ -14,38 +14,38 @@ export const QUAY_ZONES: QuayZone[] = [
     coordinates: [
       [-16.916641, 32.641257],
       [-16.916709, 32.641679],
-      [-16.915425, 32.641765],
-      [-16.915383, 32.641367],
+      [-16.914872, 32.641980],
+      [-16.914725, 32.641500],
     ],
-    displayHeading: 84,
-    displayOffsetMeters: 90,
-    displayLateralOffsetMeters: 15,
+    displayHeading: 264,
+    displayLongitude: -16.915720,
+    displayLatitude: 32.641540,
   },
   {
     id: 'quay-2',
     name: 'Cais 2',
     coordinates: [
-      [-16.915101, 32.641469],
-      [-16.915272, 32.641966],
-      [-16.910863, 32.642707],
-      [-16.910766, 32.642101],
+      [-16.914638, 32.641500],
+      [-16.914740, 32.642000],
+      [-16.910773, 32.642707],
+      [-16.910716, 32.642101],
     ],
-    displayHeading: 79,
-    displayOffsetMeters: 70,
-    displayLateralOffsetMeters: 30,
+    displayHeading: 259,
+    displayLongitude: -16.912700,
+    displayLatitude: 32.642180,
   },
   {
     id: 'quay-3',
     name: 'Cais 3',
     coordinates: [
       [-16.910455, 32.642111],
-      [-16.910530, 32.642653],
-      [-16.906990, 32.642662],
+      [-16.910530, 32.642753],
+      [-16.906950, 32.642722],
       [-16.906928, 32.642091],
     ],
-    displayHeading: 90,
-    displayOffsetMeters: 70,
-    displayLateralOffsetMeters: 30,
+    displayHeading: 270,
+    displayLongitude: -16.908690,
+    displayLatitude: 32.642430,
   },
   {
     id: 'quay-6',
@@ -56,8 +56,16 @@ export const QUAY_ZONES: QuayZone[] = [
       [-16.912576, 32.643643],
       [-16.912919, 32.644004],
     ],
-    displayHeading: 53,
-    displayOffsetMeters: 90,
-    displayLateralOffsetMeters: 0,
+    displayHeading: 233,
+    displayLongitude: -16.913860,
+    displayLatitude: 32.643100,
   },
 ];
+
+export function getQuayById(quayId: string): QuayZone | undefined {
+  return QUAY_ZONES.find(quay => quay.id === quayId);
+}
+
+export function getQuayDisplayPosition(quay: QuayZone): [number, number] {
+  return [quay.displayLongitude, quay.displayLatitude];
+}

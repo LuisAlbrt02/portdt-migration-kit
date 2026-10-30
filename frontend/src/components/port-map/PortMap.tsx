@@ -1,13 +1,10 @@
-
 'use client';
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Map as MapGL, type MapRef, useControl } from 'react-map-gl/maplibre';
 import type { DeckProps } from '@deck.gl/core';
 import { MapLibreOverlay } from '@deck.gl/maplibre';
 import { useRouter } from 'next/navigation';
-
 import { authService } from '../../lib/Auth';
 import type { EnergyData } from '../../types/EnergyData';
 import type { Boat, BoatListResponse, PortGeofence } from '../../types/Boat';
@@ -16,7 +13,11 @@ import {
   FALLBACK_MAP_STYLE, INITIAL_VIEW_STATE, MAP_HISTORY_HOURS,
   MAP_STYLE, PORT_VIEW_STATE,
 } from '../../config/portMap';
-import { QUAY_ZONES, type QuayZone } from '../../config/quayZones';
+import {
+  QUAY_ZONES,
+  getQuayDisplayPosition,
+  type QuayZone,
+} from '../../config/quayZones';
 import { add3DBuildings } from './BuildingsLayer';
 import { createBoatLayers, type BoatMapItem, type BoatStatus } from './BoatLayer';
 import { createGeofenceLayer } from './GeofenceLayer';
@@ -26,12 +27,19 @@ import TimeControls from './TimeControls';
 import { useTranslation } from '../../hooks/useTranslation';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
+
 const LATITUDE_METRIC = 65;
+
 const LONGITUDE_METRIC = 66;
+
 const MAX_COORDINATE_SKEW_MS = 120_000;
+
 const MAX_INTERPOLATION_GAP_MS = 5 * 60_000;
+
 const MAX_NEAREST_POSITION_MS = 2 * 60_000;
-const DOCKED_TIME_MS = 15 * 60_000;
+
+const DOCKED_TIME_MS = 5 * 60_000;
+
 const BOAT_HISTORY_HOURS = 24;
 
 interface Meter {
@@ -95,19 +103,15 @@ function groupEnergyRecords(payload: SeriesResponse | SeriesItem[], meters: Mete
   const meterNames = new Map(meters.map(meter => [meter.id, meter.name]));
   const grouped = new Map<string, EnergyData>();
   const bucketMs = 10_000;
-
   for (const series of getSeriesItems(payload)) {
     for (const record of series.records || []) {
       if (!Array.isArray(record) || record.length < 5) continue;
-
       const deviceId = Number(record[1]);
       const metricType = Number(record[2]);
       const timestamp = String(record[3]);
       const value = Number(record[4]);
       const timeMs = new Date(timestamp).getTime();
-
       if (![deviceId, metricType, value, timeMs].every(Number.isFinite)) continue;
-
       const bucket = Math.floor(timeMs / bucketMs) * bucketMs;
       const key = `${deviceId}-${bucket}`;
       const current = grouped.get(key) || {
@@ -116,19 +120,15 @@ function groupEnergyRecords(payload: SeriesResponse | SeriesItem[], meters: Mete
         deviceName: meterNames.get(deviceId) || `Device ${deviceId}`,
         L1: {}, L2: {}, L3: {},
       };
-
       if (new Date(timestamp).getTime() > new Date(current.timestamp).getTime()) {
         current.timestamp = timestamp;
       }
-
       if (metricType === 6) current.L1 = { ...current.L1, P: value };
       if (metricType === 7) current.L2 = { ...current.L2, P: value };
       if (metricType === 8) current.L3 = { ...current.L3, P: value };
-
       grouped.set(key, current);
     }
   }
-
   return [...grouped.values()]
     .filter(row => row.L1?.P !== undefined || row.L2?.P !== undefined || row.L3?.P !== undefined)
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -139,49 +139,38 @@ function parseBoatHistory(payload: SeriesResponse | SeriesItem[]): BoatPosition[
     latitudes: CoordinateSample[];
     longitudes: CoordinateSample[];
   }>();
-
   for (const series of getSeriesItems(payload)) {
     for (const record of series.records || []) {
       const deviceId = Number(record[1]);
       const metricType = Number(record[2]);
       const time = new Date(record[3]).getTime();
       const value = Number(record[4]);
-
       if (
         !Number.isFinite(deviceId) || !Number.isFinite(time) ||
         !Number.isFinite(value) ||
         (metricType !== LATITUDE_METRIC && metricType !== LONGITUDE_METRIC)
       ) continue;
-
       if (!devices.has(deviceId)) devices.set(deviceId, { latitudes: [], longitudes: [] });
-
       const device = devices.get(deviceId)!;
       const sample = { time, value };
-
       if (metricType === LATITUDE_METRIC) device.latitudes.push(sample);
       else device.longitudes.push(sample);
     }
   }
-
   const positions: BoatPosition[] = [];
-
   devices.forEach((coordinates, deviceId) => {
     const latitudes = coordinates.latitudes.sort((a, b) => a.time - b.time);
     const longitudes = coordinates.longitudes.sort((a, b) => a.time - b.time);
     if (!latitudes.length || !longitudes.length) return;
-
     let longitudeIndex = 0;
-
     for (const latitude of latitudes) {
       while (
         longitudeIndex + 1 < longitudes.length &&
         Math.abs(longitudes[longitudeIndex + 1].time - latitude.time) <=
         Math.abs(longitudes[longitudeIndex].time - latitude.time)
       ) longitudeIndex++;
-
       const longitude = longitudes[longitudeIndex];
       if (Math.abs(longitude.time - latitude.time) > MAX_COORDINATE_SKEW_MS) continue;
-
       const time = Math.max(latitude.time, longitude.time);
       positions.push({
         deviceId, time, timestamp: new Date(time).toISOString(),
@@ -189,7 +178,6 @@ function parseBoatHistory(payload: SeriesResponse | SeriesItem[]): BoatPosition[
       });
     }
   });
-
   return positions.sort((a, b) => a.time - b.time);
 }
 
@@ -200,14 +188,12 @@ function findDataAtTime(
   if (deviceId === null) return null;
   const deviceData = energyData.filter(item => Number(item.device) === deviceId);
   if (!deviceData.length) return null;
-
   if (live) {
     return deviceData.reduce((latest, current) =>
       new Date(current.timestamp).getTime() > new Date(latest.timestamp).getTime()
         ? current : latest
     );
   }
-
   const target = selectedTime.getTime();
   return deviceData.reduce((closest, current) => {
     const currentDiff = Math.abs(new Date(current.timestamp).getTime() - target);
@@ -219,17 +205,12 @@ function findDataAtTime(
 function mapBoatForDisplay(boat: Boat): BoatMapItem | null {
   const raw = boat as unknown as BoatApiMapData;
   const id = Number(raw.deviceId ?? raw.device ?? raw.id);
-
   if (raw.latitude == null || raw.longitude == null) return null;
-
   const latitude = Number(raw.latitude);
   const longitude = Number(raw.longitude);
-
   if (![id, latitude, longitude].every(Number.isFinite)) return null;
-
   const length = typeof raw.length === 'number' &&
     Number.isFinite(raw.length) && raw.length > 0 ? raw.length : null;
-
   return {
     id,
     name: raw.name?.trim() || `Boat ${id}`,
@@ -259,15 +240,12 @@ function calculateHeading(
 
 function getGeofencePolygon(geofence: PortGeofence | null): [number, number][] {
   if (!geofence) return [];
-
   const raw = geofence as unknown as {
     coordinates?: number[][][];
     geometry?: { coordinates?: number[][][] };
   };
-
   const coordinates = raw.geometry?.coordinates ?? raw.coordinates;
   if (!coordinates?.[0]) return [];
-
   return coordinates[0]
     .filter(point => Array.isArray(point) && point.length >= 2)
     .map(point => [Number(point[0]), Number(point[1])] as [number, number]);
@@ -278,7 +256,6 @@ function isPointInsidePolygon(
 ): boolean {
   if (polygon.length < 3) return false;
   let inside = false;
-
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
     const [xi, yi] = polygon[i];
     const [xj, yj] = polygon[j];
@@ -286,7 +263,6 @@ function isPointInsidePolygon(
       longitude < ((xj - xi) * (latitude - yi)) / (yj - yi) + xi;
     if (intersects) inside = !inside;
   }
-
   return inside;
 }
 
@@ -296,66 +272,6 @@ function getQuayForPoint(longitude: number, latitude: number): QuayZone | null {
   ) ?? null;
 }
 
-function getPolygonCenter(coordinates: [number, number][]): [number, number] {
-  if (!coordinates.length) return [0, 0];
-
-  if (coordinates.length < 3) {
-    return [
-      coordinates.reduce((sum, point) => sum + point[0], 0) / coordinates.length,
-      coordinates.reduce((sum, point) => sum + point[1], 0) / coordinates.length,
-    ];
-  }
-
-  let area2 = 0, longitudeSum = 0, latitudeSum = 0;
-
-  for (let i = 0; i < coordinates.length; i++) {
-    const current = coordinates[i];
-    const next = coordinates[(i + 1) % coordinates.length];
-    const cross = current[0] * next[1] - next[0] * current[1];
-    area2 += cross;
-    longitudeSum += (current[0] + next[0]) * cross;
-    latitudeSum += (current[1] + next[1]) * cross;
-  }
-
-  if (Math.abs(area2) < 1e-12) {
-    return [
-      coordinates.reduce((sum, point) => sum + point[0], 0) / coordinates.length,
-      coordinates.reduce((sum, point) => sum + point[1], 0) / coordinates.length,
-    ];
-  }
-
-  return [longitudeSum / (3 * area2), latitudeSum / (3 * area2)];
-}
-
-function movePointByHeading(
-  longitude: number, latitude: number, heading: number, distanceMeters: number
-): [number, number] {
-  const earthRadius = 6_378_137;
-  const headingRadians = heading * Math.PI / 180;
-  const latitudeRadians = latitude * Math.PI / 180;
-  const deltaNorth = Math.cos(headingRadians) * distanceMeters;
-  const deltaEast = Math.sin(headingRadians) * distanceMeters;
-  const deltaLatitude = deltaNorth / earthRadius;
-  const deltaLongitude = deltaEast / (earthRadius * Math.cos(latitudeRadians));
-
-  return [
-    longitude + deltaLongitude * 180 / Math.PI,
-    latitude + deltaLatitude * 180 / Math.PI,
-  ];
-}
-
-function getQuayDisplayPosition(quay: QuayZone): [number, number] {
-  const [centerLongitude, centerLatitude] = getPolygonCenter(quay.coordinates);
-  const [longitudinalLongitude, longitudinalLatitude] = movePointByHeading(
-    centerLongitude, centerLatitude, quay.displayHeading, quay.displayOffsetMeters
-  );
-
-  return movePointByHeading(
-    longitudinalLongitude, longitudinalLatitude,
-    quay.displayHeading + 90, quay.displayLateralOffsetMeters
-  );
-}
-
 function getQuayArrival(
   deviceId: number, quay: QuayZone,
   targetTime: number, history: BoatPosition[]
@@ -363,19 +279,14 @@ function getQuayArrival(
   const positions = history
     .filter(position => position.deviceId === deviceId && position.time <= targetTime)
     .sort((a, b) => a.time - b.time);
-
   if (!positions.length) return undefined;
-
   const lastIndex = positions.length - 1;
   const last = positions[lastIndex];
-
   if (
     targetTime - last.time > MAX_NEAREST_POSITION_MS ||
     !isPointInsidePolygon(last.longitude, last.latitude, quay.coordinates)
   ) return undefined;
-
   let firstInsideIndex = lastIndex;
-
   while (
     firstInsideIndex > 0 &&
     isPointInsidePolygon(
@@ -384,47 +295,34 @@ function getQuayArrival(
       quay.coordinates
     )
   ) firstInsideIndex--;
-
   if (firstInsideIndex === 0) return undefined;
   return positions[firstInsideIndex].timestamp;
 }
 
 function getBoatStatus(
-  deviceId: number, latitude: number, longitude: number,
-  targetTime: number, history: BoatPosition[],
-  geofence: PortGeofence | null, quay: QuayZone | null
+  deviceId: number, latitude: number, longitude: number, targetTime: number,
+  history: BoatPosition[], geofence: PortGeofence | null, quay: QuayZone | null
 ): BoatStatus {
   const portPolygon = getGeofencePolygon(geofence);
   if (!isPointInsidePolygon(longitude, latitude, portPolygon)) return 'Outside Port';
   if (!quay) return 'In Port';
-
-  const devicePositions = history
+  const cutoff = targetTime - DOCKED_TIME_MS;
+  const positions = history
     .filter(position => position.deviceId === deviceId && position.time <= targetTime)
     .sort((a, b) => a.time - b.time);
-
-  if (!devicePositions.length) return 'In Port';
-
-  const cutoff = targetTime - DOCKED_TIME_MS;
-  const anchor = [...devicePositions].reverse().find(position => position.time <= cutoff);
-  const recentPositions = devicePositions.filter(
-    position => position.time > cutoff && position.time <= targetTime
-  );
-
-  if (!anchor || !recentPositions.length) return 'In Port';
-
-  const lastPosition = recentPositions[recentPositions.length - 1];
-  if (targetTime - lastPosition.time > MAX_NEAREST_POSITION_MS) return 'In Port';
-
-  const positions = [anchor, ...recentPositions];
-  const sameCoordinates = positions.every(position =>
-    position.latitude === anchor.latitude && position.longitude === anchor.longitude
-  );
-
-  const allInsideSameQuay = positions.every(position =>
+  const anchor = [...positions].reverse().find(position => position.time <= cutoff);
+  if (!anchor || cutoff - anchor.time > MAX_NEAREST_POSITION_MS) return 'In Port';
+  const recent = positions.filter(position => position.time > cutoff && position.time <= targetTime);
+  if (!recent.length) return 'In Port';
+  if (targetTime - recent[recent.length - 1].time > MAX_NEAREST_POSITION_MS) return 'In Port';
+  const samples = [anchor, ...recent];
+  for (let i = 1; i < samples.length; i++) {
+    if (samples[i].time - samples[i - 1].time > MAX_NEAREST_POSITION_MS) return 'In Port';
+  }
+  const allInsideQuay = samples.every(position =>
     isPointInsidePolygon(position.longitude, position.latitude, quay.coordinates)
   );
-
-  return sameCoordinates && allInsideSameQuay ? 'Docked' : 'In Port';
+  return allInsideQuay ? 'Docked' : 'In Port';
 }
 
 function getHistoricalBoats(
@@ -434,27 +332,21 @@ function getHistoricalBoats(
   const target = selectedTime.getTime();
   const metadata = new Map(liveBoats.map(boat => [boat.id, boat]));
   const devices = new Map<number, BoatPosition[]>();
-
   history.forEach(position => {
     if (!devices.has(position.deviceId)) devices.set(position.deviceId, []);
     devices.get(position.deviceId)!.push(position);
   });
-
   const boats: BoatMapItem[] = [];
-
   devices.forEach((positions, deviceId) => {
     positions.sort((a, b) => a.time - b.time);
-
     const nextIndex = positions.findIndex(position => position.time >= target);
     const previous = nextIndex === -1
       ? positions[positions.length - 1]
       : nextIndex > 0 ? positions[nextIndex - 1] : undefined;
     const next = nextIndex >= 0 ? positions[nextIndex] : undefined;
-
     let latitude: number | undefined;
     let longitude: number | undefined;
     let heading: number | undefined;
-
     if (next?.time === target) {
       latitude = next.latitude;
       longitude = next.longitude;
@@ -475,15 +367,12 @@ function getHistoricalBoats(
         .sort((a, b) =>
           Math.abs(a.time - target) - Math.abs(b.time - target)
         )[0];
-
       if (nearest && Math.abs(nearest.time - target) <= MAX_NEAREST_POSITION_MS) {
         latitude = nearest.latitude;
         longitude = nearest.longitude;
       }
     }
-
     if (latitude === undefined || longitude === undefined) return;
-
     const currentMetadata = metadata.get(deviceId);
     const quay = getQuayForPoint(longitude, latitude);
     const status = getBoatStatus(
@@ -492,13 +381,11 @@ function getHistoricalBoats(
     const arrival = quay
       ? getQuayArrival(deviceId, quay, target, history)
       : undefined;
-
     // Only change coordinates used for visual positioning.
     const [displayLongitude, displayLatitude] = quay
       ? getQuayDisplayPosition(quay)
       : [longitude, latitude];
     const displayHeading = quay ? quay.displayHeading : heading;
-
     boats.push({
       id: deviceId,
       name: currentMetadata?.name || `Boat ${deviceId}`,
@@ -515,7 +402,6 @@ function getHistoricalBoats(
       arrival,
     });
   });
-
   return boats;
 }
 
@@ -525,7 +411,6 @@ function formatBoatDate(
   if (!value) return fallback;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-
   return new Intl.DateTimeFormat(locale, {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
@@ -545,7 +430,6 @@ export default function PortMap() {
   const router = useRouter();
   const mapRef = useRef<MapRef>(null);
   const boatCardRef = useRef<HTMLDivElement>(null);
-
   const [mapStyle, setMapStyle] = useState(MAP_STYLE);
   const [hasTriedFallback, setHasTriedFallback] = useState(false);
   const [initialZoomCompleted, setInitialZoomCompleted] = useState(false);
@@ -561,20 +445,16 @@ export default function PortMap() {
   const [boatHistory, setBoatHistory] = useState<BoatPosition[]>([]);
   const [geofence, setGeofence] = useState<PortGeofence | null>(null);
   const [selectedBoat, setSelectedBoat] = useState<BoatMapItem | null>(null);
-
   useEffect(() => {
     if (!selectedBoat) return;
-
     const handleClickOutside = (event: PointerEvent) => {
       if (boatCardRef.current && !boatCardRef.current.contains(event.target as Node)) {
         setSelectedBoat(null);
       }
     };
-
     document.addEventListener('pointerdown', handleClickOutside);
     return () => document.removeEventListener('pointerdown', handleClickOutside);
   }, [selectedBoat]);
-
   const getAuthHeaders = useCallback((): HeadersInit | null => {
     const token = authService.getToken();
     if (!token) {
@@ -582,37 +462,30 @@ export default function PortMap() {
       router.replace('/login');
       return null;
     }
-
     return {
       Accept: 'application/json',
       Authorization: `${authService.getTokenType()} ${token}`,
     };
   }, [router]);
-
   const handle401 = useCallback((status: number) => {
     if (status !== 401) return false;
     authService.logout();
     router.replace('/login');
     return true;
   }, [router]);
-
   const loadMeters = useCallback(async () => {
     const headers = getAuthHeaders();
     if (!headers) return;
-
     try {
       setMetersLoading(true);
       const response = await fetch(`${BACKEND_URL}/api/meters`, {
         headers, cache: 'no-store',
       });
-
       if (handle401(response.status)) return;
       if (!response.ok) throw new Error(`Meters API ${response.status}`);
-
       const data = await response.json() as Meter[];
       const sorted = [...data].sort((a, b) => a.name.localeCompare(b.name));
       setMeters(sorted);
-
       setSelectedDeviceId(current => {
         if (current !== null && sorted.some(meter => meter.id === current)) return current;
         return sorted.find(meter => meter.tags?.includes(EE_TAG_ID))?.id ??
@@ -624,16 +497,13 @@ export default function PortMap() {
       setMetersLoading(false);
     }
   }, [getAuthHeaders, handle401]);
-
   const loadEnergy = useCallback(async () => {
     const headers = getAuthHeaders();
     if (!headers || !meters.length) return;
-
     try {
       setEnergyLoading(true);
       const end = new Date();
       const start = new Date(end.getTime() - MAP_HISTORY_HOURS * 60 * 60 * 1000);
-
       const payload = {
         start_dtm: start.toISOString(),
         end_dtm: end.toISOString(),
@@ -648,20 +518,16 @@ export default function PortMap() {
           field: 'default',
         }],
       };
-
       const response = await fetch(`${BACKEND_URL}/api/series/data_lake`, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
       if (handle401(response.status)) return;
       if (!response.ok) throw new Error(`Series API ${response.status}`);
-
       const responseData = await response.json() as SeriesResponse | SeriesItem[];
       const transformed = groupEnergyRecords(responseData, meters);
       setEnergyData(transformed);
-
       if (isLiveMode && transformed.length) {
         const latest = Math.max(
           ...transformed.map(item => new Date(item.timestamp).getTime())
@@ -674,23 +540,18 @@ export default function PortMap() {
       setEnergyLoading(false);
     }
   }, [getAuthHeaders, handle401, isLiveMode, meters]);
-
   const loadBoats = useCallback(async () => {
     const headers = getAuthHeaders();
     if (!headers) return;
-
     try {
       const response = await fetch(`${BACKEND_URL}/api/boats`, {
         headers, cache: 'no-store',
       });
-
       if (handle401(response.status)) return;
-
       if (!response.ok) {
         const body = await response.text().catch(() => '');
         throw new Error(`Boats API ${response.status}: ${body}`);
       }
-
       const data = await response.json() as BoatListResponse;
       setBoats(Array.isArray(data.boats) ? data.boats : []);
     } catch (error) {
@@ -700,15 +561,12 @@ export default function PortMap() {
       );
     }
   }, [getAuthHeaders, handle401]);
-
   const loadBoatHistory = useCallback(async () => {
     const headers = getAuthHeaders();
     if (!headers) return;
-
     try {
       const end = new Date();
       const start = new Date(end.getTime() - BOAT_HISTORY_HOURS * 60 * 60 * 1000);
-
       const payload = {
         start_dtm: start.toISOString(),
         end_dtm: end.toISOString(),
@@ -723,77 +581,63 @@ export default function PortMap() {
           field: 'default',
         }],
       };
-
       const response = await fetch(`${BACKEND_URL}/api/series/data_lake`, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
       if (handle401(response.status)) return;
       if (!response.ok) throw new Error(`Boat history API ${response.status}`);
-
       const data = await response.json() as SeriesResponse | SeriesItem[];
       setBoatHistory(parseBoatHistory(data));
     } catch (error) {
       console.error('Boat history request error:', error);
     }
   }, [getAuthHeaders, handle401]);
-
   const loadGeofence = useCallback(async () => {
     const headers = getAuthHeaders();
     if (!headers) return;
-
     try {
       const response = await fetch(`${BACKEND_URL}/api/boats/geofence`, {
         headers, cache: 'no-store',
       });
-
       if (handle401(response.status)) return;
       if (!response.ok) throw new Error(`Geofence API ${response.status}`);
-
       setGeofence(await response.json() as PortGeofence);
     } catch (error) {
       console.error('Geofence request error:', error);
     }
   }, [getAuthHeaders, handle401]);
-
   useEffect(() => {
     void loadMeters();
     void loadBoats();
     void loadBoatHistory();
     void loadGeofence();
   }, [loadMeters, loadBoats, loadBoatHistory, loadGeofence]);
-
   useEffect(() => {
     if (!meters.length) return;
     void loadEnergy();
     const interval = setInterval(() => void loadEnergy(), ENERGY_REFRESH_MS);
     return () => clearInterval(interval);
   }, [loadEnergy, meters.length]);
-
   useEffect(() => {
     const interval = setInterval(() => void loadBoats(), BOAT_UI_REFRESH_MS);
     return () => clearInterval(interval);
   }, [loadBoats]);
-
   useEffect(() => {
     const interval = setInterval(() => void loadBoatHistory(), ENERGY_REFRESH_MS);
     return () => clearInterval(interval);
   }, [loadBoatHistory]);
-
   useEffect(() => {
     const timer = setTimeout(() => {
       const map = mapRef.current?.getMap();
       if (!map) return;
-
       map.jumpTo({
         center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude],
         zoom: INITIAL_VIEW_STATE.zoom,
         pitch: INITIAL_VIEW_STATE.pitch,
         bearing: INITIAL_VIEW_STATE.bearing,
       });
-
       map.flyTo({
         center: [PORT_VIEW_STATE.longitude, PORT_VIEW_STATE.latitude],
         zoom: PORT_VIEW_STATE.zoom,
@@ -802,42 +646,33 @@ export default function PortMap() {
         duration: 6000,
         essential: true,
       });
-
       setTimeout(() => setInitialZoomCompleted(true), 6200);
     }, 1000);
-
     return () => clearTimeout(timer);
   }, []);
-
   useEffect(() => {
     if (!isPlaying || selectedDeviceId === null) return;
-
     const futureTimes = energyData
       .filter(item => Number(item.device) === selectedDeviceId)
       .map(item => new Date(item.timestamp).getTime())
       .filter(time => time > selectedTime.getTime())
       .sort((a, b) => a - b);
-
     if (!futureTimes.length) {
       setIsPlaying(false);
       setIsLiveMode(true);
       return;
     }
-
     const timer = setTimeout(() => setSelectedTime(new Date(futureTimes[0])), 500);
     return () => clearTimeout(timer);
   }, [energyData, isPlaying, selectedDeviceId, selectedTime]);
-
   const selectedData = useMemo(() =>
     findDataAtTime(energyData, selectedDeviceId, selectedTime, isLiveMode),
     [energyData, selectedDeviceId, selectedTime, isLiveMode]
   );
-
   const activeDeviceIds = useMemo(() =>
     new Set(energyData.map(item => Number(item.device))),
     [energyData]
   );
-
   const timeRange = useMemo(() => {
     if (!energyData.length) {
       const end = new Date();
@@ -846,63 +681,53 @@ export default function PortMap() {
         end,
       };
     }
-
     const timestamps = energyData.map(item => new Date(item.timestamp).getTime());
     return {
       start: new Date(Math.min(...timestamps)),
       end: new Date(Math.max(...timestamps)),
     };
   }, [energyData]);
-
   const liveBoats = useMemo<BoatMapItem[]>(() =>
     boats.map(mapBoatForDisplay).filter(
       (boat): boat is BoatMapItem => boat !== null
     ), [boats]
   );
-
-  const liveBoatsWithStatus = useMemo(() =>
-    liveBoats.map(boat => {
-      const timestamp = boat.timestamp
-        ? new Date(boat.timestamp).getTime() : Date.now();
-
-      const realLatitude = boat.latitude;
-      const realLongitude = boat.longitude;
-      const quay = getQuayForPoint(realLongitude, realLatitude);
-
-      const status = getBoatStatus(
-        boat.id, realLatitude, realLongitude,
-        timestamp, boatHistory, geofence, quay
-      );
-
-      const arrival = quay
-        ? getQuayArrival(boat.id, quay, timestamp, boatHistory)
-        : undefined;
-
-      const [displayLongitude, displayLatitude] = quay
-        ? getQuayDisplayPosition(quay)
-        : [realLongitude, realLatitude];
-
-      return {
-        ...boat,
-        latitude: displayLatitude,
-        longitude: displayLongitude,
-        heading: quay ? quay.displayHeading : boat.heading,
-        status,
-        isInsideGeofence: status !== 'Outside Port',
-        quayId: quay?.id,
-        quayName: quay?.name,
-        arrival,
-      };
-    }), [liveBoats, boatHistory, geofence]
-  );
-
+const liveBoatsWithStatus = useMemo(() =>
+  liveBoats.map(boat => {
+    const timestamp = boat.timestamp
+      ? new Date(boat.timestamp).getTime()
+      : Date.now();
+    const realLatitude = boat.latitude;
+    const realLongitude = boat.longitude;
+    const quay = getQuayForPoint(realLongitude, realLatitude);
+    const status = getBoatStatus(
+      boat.id, realLatitude, realLongitude,
+      timestamp, boatHistory, geofence, quay
+    );
+    const arrival = quay
+      ? getQuayArrival(boat.id, quay, timestamp, boatHistory)
+      : undefined;
+    const [displayLongitude, displayLatitude] = quay
+      ? getQuayDisplayPosition(quay)
+      : [realLongitude, realLatitude];
+    return {
+      ...boat,
+      longitude: displayLongitude,
+      latitude: displayLatitude,
+      heading: quay ? quay.displayHeading : boat.heading,
+      status,
+      isInsideGeofence: status !== 'Outside Port',
+      quayId: quay?.id,
+      quayName: quay?.name,
+      arrival,
+    };
+  }), [liveBoats, boatHistory, geofence]
+);
   const historicalBoats = useMemo(() =>
     getHistoricalBoats(boatHistory, selectedTime, liveBoats, geofence),
     [boatHistory, selectedTime, liveBoats, geofence]
   );
-
   const displayedBoats = isLiveMode ? liveBoatsWithStatus : historicalBoats;
-
   const layers = useMemo(() => {
     const geofenceLayer = createGeofenceLayer(geofence);
     return [
@@ -911,37 +736,30 @@ export default function PortMap() {
       ...createBoatLayers(displayedBoats, setSelectedBoat),
     ];
   }, [displayedBoats, geofence, t.quay]);
-
   const handleTimeChange = (time: Date) => {
     setSelectedBoat(null);
     setSelectedTime(time);
     setIsLiveMode(false);
     setIsPlaying(false);
   };
-
   const handlePlayPause = () => {
     setSelectedBoat(null);
     setIsLiveMode(false);
     setIsPlaying(current => !current);
   };
-
   const handleReset = () => {
     setSelectedBoat(null);
     setIsPlaying(false);
     setIsLiveMode(true);
-
     const deviceData = energyData.filter(
       item => Number(item.device) === selectedDeviceId
     );
-
     if (!deviceData.length) return;
-
     const latest = Math.max(
       ...deviceData.map(item => new Date(item.timestamp).getTime())
     );
     setSelectedTime(new Date(latest));
   };
-
   return (
     <div className="relative h-full min-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl">
       {initialZoomCompleted && (
@@ -968,7 +786,6 @@ export default function PortMap() {
           />
         </>
       )}
-
       {selectedBoat && (
         <div
           ref={boatCardRef}
@@ -982,7 +799,6 @@ export default function PortMap() {
               {selectedBoat.name}
             </h3>
           </div>
-
           <div className="space-y-4 px-3 py-3">
             <div className="flex items-center justify-between gap-5">
               <span className="text-base text-slate-500">{t.status}</span>
@@ -1000,14 +816,12 @@ export default function PortMap() {
                     : t.outsidePort}
               </span>
             </div>
-
             <div className="flex items-center justify-between gap-5">
               <span className="text-base text-slate-500">{t.quay}</span>
               <span className="text-right text-base font-semibold text-slate-900">
                 {formatQuayName(selectedBoat.quayName, t.quay) ?? t.notAvailable}
               </span>
             </div>
-
             <div className="flex items-center justify-between gap-5">
               <span className="text-base text-slate-500">{t.arrival}</span>
               <span className="text-right text-base font-semibold text-slate-900">
@@ -1017,7 +831,6 @@ export default function PortMap() {
           </div>
         </div>
       )}
-
       <MapGL
         ref={mapRef}
         initialViewState={INITIAL_VIEW_STATE}
