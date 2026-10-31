@@ -452,6 +452,17 @@ export const translations = {
     backToLogin: 'Back to Login',
     
     // Map Components
+    mapPanControls: 'Map movement controls',
+    mapMoveUp: 'Move map up',
+    mapMoveDown: 'Move map down',
+    mapMoveLeft: 'Move map left',
+    mapMoveRight: 'Move map right',
+
+    loadingPortMap: "Loading Port Map...",
+    preparingPortData: "Preparing map, boats and sensors",
+    mapLoadError: "Could not load the complete map",
+    mapLoadErrorDetails: "Check the connection to the server and map services.",
+    retry: "Retry",
     waitingForSensorData: 'Waiting for sensor data...',
     sensors: 'Sensors',
     previousDevice: 'Previous device',
@@ -1038,6 +1049,16 @@ export const translations = {
     backToLogin: 'Voltar ao Início de Sessão',
     
     // Map Components
+    mapPanControls: 'Controlos de deslocação do mapa',
+    mapMoveUp: 'Mover mapa para cima',
+    mapMoveDown: 'Mover mapa para baixo',
+    mapMoveLeft: 'Mover mapa para a esquerda',
+    mapMoveRight: 'Mover mapa para a direita',
+    loadingPortMap: "A carregar o mapa do porto...",
+    preparingPortData: "A preparar o mapa, os barcos e os sensores",
+    mapLoadError: "Não foi possível carregar o mapa completo",
+    mapLoadErrorDetails: "Verifique a ligação ao servidor e aos serviços de mapas.",
+    retry: "Tentar novamente",
     waitingForSensorData: 'A aguardar dados dos sensores...',
     sensors: 'Sensores',
     previousDevice: 'Dispositivo anterior',

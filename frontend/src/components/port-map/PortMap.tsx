@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { Map as MapGL, type MapRef, useControl } from 'react-map-gl/maplibre';
+import { Map as MapGL, type MapRef, NavigationControl, useControl } from 'react-map-gl/maplibre';
 import type { DeckProps } from '@deck.gl/core';
 import { MapLibreOverlay } from '@deck.gl/maplibre';
 import { useRouter } from 'next/navigation';
@@ -15,7 +15,6 @@ import {
 } from '../../config/portMap';
 import {
   QUAY_ZONES,
-  getQuayDisplayPosition,
   type QuayZone,
 } from '../../config/quayZones';
 import { add3DBuildings } from './BuildingsLayer';
@@ -25,41 +24,31 @@ import { createQuayLayers } from './QuayLayer';
 import MapSensorPanel from './MapSensorPanel';
 import TimeControls from './TimeControls';
 import { useTranslation } from '../../hooks/useTranslation';
-
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
-
 const LATITUDE_METRIC = 65;
-
 const LONGITUDE_METRIC = 66;
-
 const MAX_COORDINATE_SKEW_MS = 120_000;
-
 const MAX_INTERPOLATION_GAP_MS = 5 * 60_000;
-
 const MAX_NEAREST_POSITION_MS = 2 * 60_000;
-
 const DOCKED_TIME_MS = 5 * 60_000;
-
 const BOAT_HISTORY_HOURS = 24;
-
+type InitialDataKey = 'meters' | 'energy' | 'boats' | 'history' | 'geofence';
+type LoadState = 'loading' | 'ready' | 'error';
+const INITIAL_DATA_KEYS: InitialDataKey[] = ['meters', 'energy', 'boats', 'history', 'geofence'];
 interface Meter {
   id: number;
   name: string;
   idSite: number;
   tags?: number[];
 }
-
 type SeriesRecord = [number, number, number, string, number];
-
 interface SeriesItem {
   records?: SeriesRecord[];
 }
-
 interface SeriesResponse {
   series?: SeriesItem[];
   data?: SeriesItem[];
 }
-
 interface BoatApiMapData {
   id?: number | string;
   deviceId?: number | string;
@@ -74,12 +63,10 @@ interface BoatApiMapData {
   insidePortZone?: boolean;
   isInsideGeofence?: boolean;
 }
-
 interface CoordinateSample {
   time: number;
   value: number;
 }
-
 interface BoatPosition {
   deviceId: number;
   time: number;
@@ -87,18 +74,15 @@ interface BoatPosition {
   latitude: number;
   longitude: number;
 }
-
 function DeckGLOverlay(props: DeckProps) {
   const deckProps = { ...props, interleaved: false };
   const overlay = useControl<MapLibreOverlay>(() => new MapLibreOverlay(deckProps));
   overlay.setProps(deckProps);
   return null;
 }
-
 function getSeriesItems(payload: SeriesResponse | SeriesItem[]): SeriesItem[] {
   return Array.isArray(payload) ? payload : payload.series || payload.data || [];
 }
-
 function groupEnergyRecords(payload: SeriesResponse | SeriesItem[], meters: Meter[]): EnergyData[] {
   const meterNames = new Map(meters.map(meter => [meter.id, meter.name]));
   const grouped = new Map<string, EnergyData>();
@@ -133,7 +117,6 @@ function groupEnergyRecords(payload: SeriesResponse | SeriesItem[], meters: Mete
     .filter(row => row.L1?.P !== undefined || row.L2?.P !== undefined || row.L3?.P !== undefined)
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 }
-
 function parseBoatHistory(payload: SeriesResponse | SeriesItem[]): BoatPosition[] {
   const devices = new Map<number, {
     latitudes: CoordinateSample[];
@@ -180,7 +163,6 @@ function parseBoatHistory(payload: SeriesResponse | SeriesItem[]): BoatPosition[
   });
   return positions.sort((a, b) => a.time - b.time);
 }
-
 function findDataAtTime(
   energyData: EnergyData[], deviceId: number | null,
   selectedTime: Date, live: boolean
@@ -201,7 +183,6 @@ function findDataAtTime(
     return currentDiff < closestDiff ? current : closest;
   });
 }
-
 function mapBoatForDisplay(boat: Boat): BoatMapItem | null {
   const raw = boat as unknown as BoatApiMapData;
   const id = Number(raw.deviceId ?? raw.device ?? raw.id);
@@ -222,7 +203,6 @@ function mapBoatForDisplay(boat: Boat): BoatMapItem | null {
     isInsideGeofence: raw.insidePortZone ?? raw.isInsideGeofence ?? false,
   };
 }
-
 function calculateHeading(
   latitude1: number, longitude1: number,
   latitude2: number, longitude2: number
@@ -237,7 +217,6 @@ function calculateHeading(
     Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLongitude);
   return (toDegrees(Math.atan2(y, x)) + 360) % 360;
 }
-
 function getGeofencePolygon(geofence: PortGeofence | null): [number, number][] {
   if (!geofence) return [];
   const raw = geofence as unknown as {
@@ -250,7 +229,6 @@ function getGeofencePolygon(geofence: PortGeofence | null): [number, number][] {
     .filter(point => Array.isArray(point) && point.length >= 2)
     .map(point => [Number(point[0]), Number(point[1])] as [number, number]);
 }
-
 function isPointInsidePolygon(
   longitude: number, latitude: number, polygon: [number, number][]
 ): boolean {
@@ -265,13 +243,37 @@ function isPointInsidePolygon(
   }
   return inside;
 }
-
 function getQuayForPoint(longitude: number, latitude: number): QuayZone | null {
   return QUAY_ZONES.find(zone =>
     isPointInsidePolygon(longitude, latitude, zone.coordinates)
   ) ?? null;
 }
-
+function getQuayHeading(quay: QuayZone): number {
+  const [lon1, lat1] = quay.berthStart;
+  const [lon2, lat2] = quay.berthEnd;
+  return calculateHeading(lat1, lon1, lat2, lon2);
+}
+function distributeBoatsAtQuays(boats: BoatMapItem[]): BoatMapItem[] {
+  const positions = new Map<number, { longitude: number; latitude: number; heading: number }>();
+  for (const quay of QUAY_ZONES) {
+    const assigned = boats.filter(boat => boat.quayId === quay.id).sort((a, b) => a.id - b.id);
+    const heading = getQuayHeading(quay);
+    const radians = (heading - 90) * Math.PI / 180;
+    const offset = quay.berthOffsetMeters;
+    assigned.forEach((boat, index) => {
+      const ratio = (index + 1) / (assigned.length + 1);
+      const longitude = quay.berthStart[0] + (quay.berthEnd[0] - quay.berthStart[0]) * ratio;
+      const latitude = quay.berthStart[1] + (quay.berthEnd[1] - quay.berthStart[1]) * ratio;
+      const adjustedLatitude = latitude + (offset * Math.cos(radians)) / 111320;
+      const adjustedLongitude = longitude + (offset * Math.sin(radians)) / (111320 * Math.cos(latitude * Math.PI / 180));
+      positions.set(boat.id, { longitude: adjustedLongitude, latitude: adjustedLatitude, heading });
+    });
+  }
+  return boats.map(boat => {
+    const position = positions.get(boat.id);
+    return position ? { ...boat, ...position } : boat;
+  });
+}
 function getQuayArrival(
   deviceId: number, quay: QuayZone,
   targetTime: number, history: BoatPosition[]
@@ -298,7 +300,6 @@ function getQuayArrival(
   if (firstInsideIndex === 0) return undefined;
   return positions[firstInsideIndex].timestamp;
 }
-
 function getBoatStatus(
   deviceId: number, latitude: number, longitude: number, targetTime: number,
   history: BoatPosition[], geofence: PortGeofence | null, quay: QuayZone | null
@@ -324,7 +325,6 @@ function getBoatStatus(
   );
   return allInsideQuay ? 'Docked' : 'In Port';
 }
-
 function getHistoricalBoats(
   history: BoatPosition[], selectedTime: Date,
   liveBoats: BoatMapItem[], geofence: PortGeofence | null
@@ -381,19 +381,14 @@ function getHistoricalBoats(
     const arrival = quay
       ? getQuayArrival(deviceId, quay, target, history)
       : undefined;
-    // Only change coordinates used for visual positioning.
-    const [displayLongitude, displayLatitude] = quay
-      ? getQuayDisplayPosition(quay)
-      : [longitude, latitude];
-    const displayHeading = quay ? quay.displayHeading : heading;
     boats.push({
       id: deviceId,
       name: currentMetadata?.name || `Boat ${deviceId}`,
       length: currentMetadata?.length ?? null,
       boatType: currentMetadata?.boatType ?? null,
-      latitude: displayLatitude,
-      longitude: displayLongitude,
-      heading: displayHeading,
+      latitude,
+      longitude,
+      heading,
       timestamp: selectedTime.toISOString(),
       status,
       isInsideGeofence: status !== 'Outside Port',
@@ -402,9 +397,8 @@ function getHistoricalBoats(
       arrival,
     });
   });
-  return boats;
+  return distributeBoatsAtQuays(boats);
 }
-
 function formatBoatDate(
   value: string | undefined, locale: string, fallback: string
 ): string {
@@ -416,7 +410,6 @@ function formatBoatDate(
     hour: '2-digit', minute: '2-digit',
   }).format(date);
 }
-
 function formatQuayName(
   value: string | undefined, prefix: string
 ): string | undefined {
@@ -424,7 +417,20 @@ function formatQuayName(
   const number = value.match(/\d+/)?.[0];
   return number ? `${prefix} ${number}` : value;
 }
-
+type PadDirection = 'up' | 'right' | 'down' | 'left';
+function DirectionPadButton({ direction, label, onClick }: { direction: PadDirection; label: string; onClick: () => void }) {
+  const rotations: Record<PadDirection, number> = { up: 0, right: 90, down: 180, left: 270 };
+  return (
+    <button type="button" aria-label={label} title={label} onClick={onClick}
+      className="flex h-10 w-10 items-center justify-center border-0 bg-transparent p-0 shadow-none transition-transform hover:scale-105 active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600">
+      <svg viewBox="0 0 100 100" aria-hidden="true" className="h-full w-full">
+        <g transform={`rotate(${rotations[direction]} 50 50)`}>
+          <path d="M50 12 C56 12 60 16 63 21 L83 58 C87 65 82 74 74 74 L26 74 C18 74 13 65 17 58 L37 21 C40 16 44 12 50 12Z" fill="#ffffff" stroke="#c0c0c0" />
+        </g>
+      </svg>
+    </button>
+  );
+}
 export default function PortMap() {
   const t = useTranslation();
   const router = useRouter();
@@ -433,6 +439,19 @@ export default function PortMap() {
   const [mapStyle, setMapStyle] = useState(MAP_STYLE);
   const [hasTriedFallback, setHasTriedFallback] = useState(false);
   const [initialZoomCompleted, setInitialZoomCompleted] = useState(false);
+  const [flightStarted, setFlightStarted] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapTimedOut, setMapTimedOut] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [initialData, setInitialData] = useState<Record<InitialDataKey, LoadState>>({
+    meters: 'loading', energy: 'loading', boats: 'loading', history: 'loading', geofence: 'loading',
+  });
+  const markInitialData = useCallback((key: InitialDataKey, state: LoadState) => {
+    setInitialData(current => current[key] === 'ready' ? current : { ...current, [key]: state });
+  }, []);
+  const allDataReady = INITIAL_DATA_KEYS.every(key => initialData[key] === 'ready');
+  const initialError = INITIAL_DATA_KEYS.some(key => initialData[key] === 'error') || mapTimedOut;
+  const readyToDisplay = allDataReady && mapReady && initialZoomCompleted;
   const [meters, setMeters] = useState<Meter[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
   const [energyData, setEnergyData] = useState<EnergyData[]>([]);
@@ -486,6 +505,7 @@ export default function PortMap() {
       const data = await response.json() as Meter[];
       const sorted = [...data].sort((a, b) => a.name.localeCompare(b.name));
       setMeters(sorted);
+      markInitialData('meters', 'ready');
       setSelectedDeviceId(current => {
         if (current !== null && sorted.some(meter => meter.id === current)) return current;
         return sorted.find(meter => meter.tags?.includes(EE_TAG_ID))?.id ??
@@ -493,13 +513,15 @@ export default function PortMap() {
       });
     } catch (error) {
       console.error('Meters request error:', error);
+      markInitialData('meters', 'error');
     } finally {
       setMetersLoading(false);
     }
-  }, [getAuthHeaders, handle401]);
+  }, [getAuthHeaders, handle401, markInitialData]);
   const loadEnergy = useCallback(async () => {
     const headers = getAuthHeaders();
-    if (!headers || !meters.length) return;
+    if (!headers) return;
+    if (!meters.length) { markInitialData('energy', 'ready'); return; }
     try {
       setEnergyLoading(true);
       const end = new Date();
@@ -528,6 +550,7 @@ export default function PortMap() {
       const responseData = await response.json() as SeriesResponse | SeriesItem[];
       const transformed = groupEnergyRecords(responseData, meters);
       setEnergyData(transformed);
+      markInitialData('energy', 'ready');
       if (isLiveMode && transformed.length) {
         const latest = Math.max(
           ...transformed.map(item => new Date(item.timestamp).getTime())
@@ -536,10 +559,11 @@ export default function PortMap() {
       }
     } catch (error) {
       console.error('Energy request error:', error);
+      markInitialData('energy', 'error');
     } finally {
       setEnergyLoading(false);
     }
-  }, [getAuthHeaders, handle401, isLiveMode, meters]);
+  }, [getAuthHeaders, handle401, isLiveMode, meters, markInitialData]);
   const loadBoats = useCallback(async () => {
     const headers = getAuthHeaders();
     if (!headers) return;
@@ -554,13 +578,15 @@ export default function PortMap() {
       }
       const data = await response.json() as BoatListResponse;
       setBoats(Array.isArray(data.boats) ? data.boats : []);
+      markInitialData('boats', 'ready');
     } catch (error) {
+      markInitialData('boats', 'error');
       console.warn(
         '[MAP] Could not refresh boats:',
         error instanceof Error ? error.message : error
       );
     }
-  }, [getAuthHeaders, handle401]);
+  }, [getAuthHeaders, handle401, markInitialData]);
   const loadBoatHistory = useCallback(async () => {
     const headers = getAuthHeaders();
     if (!headers) return;
@@ -590,10 +616,12 @@ export default function PortMap() {
       if (!response.ok) throw new Error(`Boat history API ${response.status}`);
       const data = await response.json() as SeriesResponse | SeriesItem[];
       setBoatHistory(parseBoatHistory(data));
+      markInitialData('history', 'ready');
     } catch (error) {
       console.error('Boat history request error:', error);
+      markInitialData('history', 'error');
     }
-  }, [getAuthHeaders, handle401]);
+  }, [getAuthHeaders, handle401, markInitialData]);
   const loadGeofence = useCallback(async () => {
     const headers = getAuthHeaders();
     if (!headers) return;
@@ -604,22 +632,27 @@ export default function PortMap() {
       if (handle401(response.status)) return;
       if (!response.ok) throw new Error(`Geofence API ${response.status}`);
       setGeofence(await response.json() as PortGeofence);
+      markInitialData('geofence', 'ready');
     } catch (error) {
       console.error('Geofence request error:', error);
+      markInitialData('geofence', 'error');
     }
-  }, [getAuthHeaders, handle401]);
+  }, [getAuthHeaders, handle401, markInitialData]);
   useEffect(() => {
     void loadMeters();
     void loadBoats();
     void loadBoatHistory();
     void loadGeofence();
-  }, [loadMeters, loadBoats, loadBoatHistory, loadGeofence]);
+  }, [loadMeters, loadBoats, loadBoatHistory, loadGeofence, retryCount]);
   useEffect(() => {
-    if (!meters.length) return;
+    if (!meters.length) {
+      if (initialData.meters === 'ready') markInitialData('energy', 'ready');
+      return;
+    }
     void loadEnergy();
     const interval = setInterval(() => void loadEnergy(), ENERGY_REFRESH_MS);
     return () => clearInterval(interval);
-  }, [loadEnergy, meters.length]);
+  }, [loadEnergy, meters.length, retryCount, initialData.meters, markInitialData]);
   useEffect(() => {
     const interval = setInterval(() => void loadBoats(), BOAT_UI_REFRESH_MS);
     return () => clearInterval(interval);
@@ -629,27 +662,34 @@ export default function PortMap() {
     return () => clearInterval(interval);
   }, [loadBoatHistory]);
   useEffect(() => {
-    const timer = setTimeout(() => {
-      const map = mapRef.current?.getMap();
-      if (!map) return;
-      map.jumpTo({
-        center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude],
-        zoom: INITIAL_VIEW_STATE.zoom,
-        pitch: INITIAL_VIEW_STATE.pitch,
-        bearing: INITIAL_VIEW_STATE.bearing,
-      });
-      map.flyTo({
-        center: [PORT_VIEW_STATE.longitude, PORT_VIEW_STATE.latitude],
-        zoom: PORT_VIEW_STATE.zoom,
-        pitch: PORT_VIEW_STATE.pitch,
-        bearing: PORT_VIEW_STATE.bearing,
-        duration: 6000,
-        essential: true,
-      });
-      setTimeout(() => setInitialZoomCompleted(true), 6200);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, []);
+    if (!allDataReady || !mapReady || flightStarted) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    setFlightStarted(true);
+    map.flyTo({
+      center: [PORT_VIEW_STATE.longitude, PORT_VIEW_STATE.latitude],
+      zoom: PORT_VIEW_STATE.zoom,
+      pitch: PORT_VIEW_STATE.pitch,
+      bearing: PORT_VIEW_STATE.bearing,
+      duration: 6000,
+      essential: true,
+    });
+  }, [allDataReady, mapReady, flightStarted]);
+  useEffect(() => {
+    if (mapReady) return;
+    const timeout = setTimeout(() => setMapTimedOut(true), 30000);
+    return () => clearTimeout(timeout);
+  }, [mapReady, retryCount]);
+  const retryInitialLoad = () => {
+    setInitialData({ meters: 'loading', energy: 'loading', boats: 'loading', history: 'loading', geofence: 'loading' });
+    setMapTimedOut(false);
+    setMapReady(false);
+    setFlightStarted(false);
+    setInitialZoomCompleted(false);
+    setRetryCount(value => value + 1);
+    const map = mapRef.current?.getMap();
+    if (map?.isStyleLoaded() && map.areTilesLoaded() && !map.isMoving()) setMapReady(true);
+  };
   useEffect(() => {
     if (!isPlaying || selectedDeviceId === null) return;
     const futureTimes = energyData
@@ -692,8 +732,8 @@ export default function PortMap() {
       (boat): boat is BoatMapItem => boat !== null
     ), [boats]
   );
-const liveBoatsWithStatus = useMemo(() =>
-  liveBoats.map(boat => {
+  const liveBoatsWithStatus = useMemo(() =>
+  distributeBoatsAtQuays(liveBoats.map(boat => {
     const timestamp = boat.timestamp
       ? new Date(boat.timestamp).getTime()
       : Date.now();
@@ -707,22 +747,16 @@ const liveBoatsWithStatus = useMemo(() =>
     const arrival = quay
       ? getQuayArrival(boat.id, quay, timestamp, boatHistory)
       : undefined;
-    const [displayLongitude, displayLatitude] = quay
-      ? getQuayDisplayPosition(quay)
-      : [realLongitude, realLatitude];
     return {
       ...boat,
-      longitude: displayLongitude,
-      latitude: displayLatitude,
-      heading: quay ? quay.displayHeading : boat.heading,
       status,
       isInsideGeofence: status !== 'Outside Port',
       quayId: quay?.id,
       quayName: quay?.name,
       arrival,
     };
-  }), [liveBoats, boatHistory, geofence]
-);
+  })), [liveBoats, boatHistory, geofence]
+  );
   const historicalBoats = useMemo(() =>
     getHistoricalBoats(boatHistory, selectedTime, liveBoats, geofence),
     [boatHistory, selectedTime, liveBoats, geofence]
@@ -760,9 +794,12 @@ const liveBoatsWithStatus = useMemo(() =>
     );
     setSelectedTime(new Date(latest));
   };
+  const moveMap = (x: number, y: number) => {
+    mapRef.current?.getMap().panBy([x, y], { duration: 350 });
+  };
   return (
     <div className="relative h-full min-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-xl">
-      {initialZoomCompleted && (
+      {readyToDisplay && (
         <>
           <MapSensorPanel
             meters={meters}
@@ -786,7 +823,7 @@ const liveBoatsWithStatus = useMemo(() =>
           />
         </>
       )}
-      {selectedBoat && (
+      {readyToDisplay && selectedBoat && (
         <div
           ref={boatCardRef}
           className="absolute left-1/2 top-6 z-30 w-[340px] -translate-x-1/2 overflow-hidden rounded-2xl bg-white shadow-2xl"
@@ -831,10 +868,27 @@ const liveBoatsWithStatus = useMemo(() =>
           </div>
         </div>
       )}
+      {!flightStarted && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-slate-50 text-slate-800">
+          {initialError ? (
+            <>
+              <p className="text-lg font-semibold">{t.mapLoadError}</p>
+              <p className="max-w-md text-center text-sm text-slate-500">{t.mapLoadErrorDetails}</p>
+              <button type="button" onClick={retryInitialLoad} className="rounded-lg bg-blue-600 px-5 py-2 font-medium hover:bg-blue-500">{t.retry}</button>
+            </>
+          ) : (
+            <>
+              <div className="h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" role="status" aria-label={t.loadingPortMap} />
+              <p className="text-lg font-semibold">{t.loadingPortMap}</p>
+              <p className="text-sm text-slate-500">{t.preparingPortData}</p>
+            </>
+          )}
+        </div>
+      )}
       <MapGL
         ref={mapRef}
         initialViewState={INITIAL_VIEW_STATE}
-        style={{ width: '100%', height: '100%' }}
+        style={{ width: '100%', height: '100%', visibility: flightStarted ? 'visible' : 'hidden' }}
         mapStyle={mapStyle}
         attributionControl={false}
         onError={() => {
@@ -842,6 +896,12 @@ const liveBoatsWithStatus = useMemo(() =>
             setHasTriedFallback(true);
             setMapStyle(FALLBACK_MAP_STYLE);
           }
+        }}
+        onIdle={event => {
+          if (!mapReady && event.target.isStyleLoaded() && event.target.areTilesLoaded()) setMapReady(true);
+        }}
+        onMoveEnd={() => {
+          if (flightStarted && !initialZoomCompleted) setInitialZoomCompleted(true);
         }}
         onLoad={event => {
           try {
@@ -851,8 +911,17 @@ const liveBoatsWithStatus = useMemo(() =>
           }
         }}
       >
+        {readyToDisplay && <NavigationControl position="bottom-right" showZoom showCompass visualizePitch />}
         <DeckGLOverlay layers={layers} />
       </MapGL>
+      {readyToDisplay && (
+        <div className="absolute bottom-3 right-16 z-30 h-24 w-24" role="group" aria-label={t.mapPanControls}>
+          <div className="absolute left-1/2 top-0 -translate-x-1/2"><DirectionPadButton direction="up" label={t.mapMoveUp} onClick={() => moveMap(0, -140)} /></div>
+          <div className="absolute right-0 top-1/2 -translate-y-1/2"><DirectionPadButton direction="right" label={t.mapMoveRight} onClick={() => moveMap(140, 0)} /></div>
+          <div className="absolute bottom-0 left-1/2 -translate-x-1/2"><DirectionPadButton direction="down" label={t.mapMoveDown} onClick={() => moveMap(0, 140)} /></div>
+          <div className="absolute left-0 top-1/2 -translate-y-1/2"><DirectionPadButton direction="left" label={t.mapMoveLeft} onClick={() => moveMap(-140, 0)} /></div>
+        </div>
+      )}
     </div>
   );
 }
