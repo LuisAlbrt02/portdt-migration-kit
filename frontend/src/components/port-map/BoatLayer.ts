@@ -56,15 +56,14 @@ export function createBoatLayers(
       Number.isFinite(boat.latitude)
   );
 
-    // DEBUG: Check boat types received from the API
-  console.table(
-    validBoats.map(boat => ({
-      id: boat.id,
-      name: boat.name,
-      boatType: boat.boatType,
-      length: boat.length,
-    }))
-  );
+  //console.table(
+  //  validBoats.map(boat => ({
+  //    id: boat.id,
+  //    name: boat.name,
+  //    boatType: boat.boatType,
+  //    length: boat.length,
+  //  }))
+  //);
 
   return MODEL_TYPES.map(type => {
     const modelBoats = validBoats.filter(

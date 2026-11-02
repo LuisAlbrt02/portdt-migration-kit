@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Activity, Clock, Database, PieChart, TrendingUp, Wifi, WifiOff, Zap } from 'lucide-react';
 import { Line } from 'react-chartjs-2';
@@ -350,6 +350,8 @@ export default function PortEnergyOverview() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('15min');
   const [selectedMeterIds, setSelectedMeterIds] = useState<number[]>([]);
+  const selectionInitialized = useRef(false);
+  const deviceSelectRef = useRef<HTMLDetailsElement>(null);
   const [chartFontFamily, setChartFontFamily] = useState('');
   useEffect(() => {
     const fontFamily = window.getComputedStyle(document.body).fontFamily;
@@ -549,19 +551,24 @@ export default function PortEnergyOverview() {
       .sort((a, b) => a.id - b.id);
   }, [periodData, meters]);
   useEffect(() => {
-    if (!chartMeterOptions.length) {
-      setSelectedMeterIds([]);
+    if (!chartMeterOptions.length) return;
+    const availableIds = chartMeterOptions.map(meter => meter.id);
+    if (!selectionInitialized.current) {
+      selectionInitialized.current = true;
+      setSelectedMeterIds(availableIds);
       return;
     }
-    setSelectedMeterIds(current => {
-      const validIds = current.filter(id =>
-        chartMeterOptions.some(meter => meter.id === id)
-      );
-      return validIds.length
-        ? validIds
-        : [chartMeterOptions[0].id];
-    });
+    setSelectedMeterIds(current => current.filter(id => availableIds.includes(id)));
   }, [chartMeterOptions]);
+  useEffect(() => {
+    const handleClickOutside = (event: PointerEvent) => {
+      if (deviceSelectRef.current && !deviceSelectRef.current.contains(event.target as Node)) {
+        deviceSelectRef.current.open = false;
+      }
+    };
+    document.addEventListener('pointerdown', handleClickOutside);
+    return () => document.removeEventListener('pointerdown', handleClickOutside);
+  }, []);
   const toggleChartMeter = (meterId: number) => {
     setSelectedMeterIds(current =>
       current.includes(meterId)
@@ -582,82 +589,63 @@ export default function PortEnergyOverview() {
     const eeMeter = meters.find(meter => meter.tags?.includes(EE_TAG_ID));
     if (!eeMeter) return { labels: [] as Date[], datasets: [] };
     const selectedIds = new Set(selectedMeterIds);
-    const validMetrics = new Set([6, 7, 8]);
-    // device -> timestamp (one-second phase alignment) -> phase -> latest actual reading
-    // No minute or multi-minute buckets, no averaging or synthetic initial values.
-    const deviceMeasurements = new Map<
-      number,
-      Map<number, Map<number, { time: number; watts: number }>>
-    >();
-    const expectedPhases = new Map<number, Set<number>>();
+    // Align devices into the same time slots so the areas can stack vertically.
+    // Missing readings remain null; they are never treated as measurements of 0 kW.
+    const bucketMs = 60_000;
+    const samples = new Map<number, Map<number, Map<number, { time: number; watts: number }>>>();
     for (const series of periodData.series) {
       const deviceId = Number(series.device);
-      const metricType = Number(series.metric_type);
-      if (deviceId === eeMeter.id || !selectedIds.has(deviceId)) continue;
-      if (!validMetrics.has(metricType)) continue;
-      if (!deviceMeasurements.has(deviceId)) {
-        deviceMeasurements.set(deviceId, new Map());
-        expectedPhases.set(deviceId, new Set());
-      }
+      const metric = Number(series.metric_type);
+      if (deviceId === eeMeter.id || !selectedIds.has(deviceId) || ![6, 7, 8].includes(metric)) continue;
+      if (!samples.has(deviceId)) samples.set(deviceId, new Map());
+      const deviceBuckets = samples.get(deviceId)!;
       for (const record of series.records ?? []) {
         const time = new Date(record[3]).getTime();
-        const watts = record[4];
-        if (!Number.isFinite(time) || typeof watts !== 'number' || !Number.isFinite(watts)) continue;
-        expectedPhases.get(deviceId)!.add(metricType);
-        // Align L1/L2/L3 within one second, preserving the latest sample per phase.
-        const timestamp = Math.floor(time / 1000) * 1000;
-        const timestampMap = deviceMeasurements.get(deviceId)!;
-        if (!timestampMap.has(timestamp)) timestampMap.set(timestamp, new Map());
-        const phases = timestampMap.get(timestamp)!;
-        const previous = phases.get(metricType);
-        if (!previous || time >= previous.time) {
-          phases.set(metricType, { time, watts });
-        }
+        const watts = Number(record[4]);
+        if (!Number.isFinite(time) || !Number.isFinite(watts)) continue;
+        const bucket = Math.floor(time / bucketMs) * bucketMs;
+        if (!deviceBuckets.has(bucket)) deviceBuckets.set(bucket, new Map());
+        const phases = deviceBuckets.get(bucket)!;
+        const previous = phases.get(metric);
+        if (!previous || time >= previous.time) phases.set(metric, { time, watts });
       }
     }
-    const allTimestamps = new Set<number>();
-    deviceMeasurements.forEach(timestampMap => {
-      timestampMap.forEach((phases, timestamp) => {
-        if (phases.size > 0) allTimestamps.add(timestamp);
-      });
+    // Insert non-measurement timestamps only when a gap exceeds 5 minutes.
+    // They create explicit nulls so Chart.js does not bridge missing intervals.
+    const MAX_GAP_MS = 5 * 60_000;
+    const actualTimestamps = [...new Set([...samples.values()].flatMap(buckets => [...buckets.keys()]))].sort((a, b) => a - b);
+    const timestamps: number[] = [];
+    actualTimestamps.forEach((timestamp, index) => {
+      if (index > 0 && timestamp - actualTimestamps[index - 1] > MAX_GAP_MS) {
+        timestamps.push(actualTimestamps[index - 1] + (timestamp - actualTimestamps[index - 1]) / 2);
+      }
+      timestamps.push(timestamp);
     });
-    const sortedTimestamps = [...allTimestamps].sort((a, b) => a - b);
-    if (!sortedTimestamps.length) return { labels: [] as Date[], datasets: [] };
-    const labels = sortedTimestamps.map(timestamp => new Date(timestamp));
-    const datasets = [...deviceMeasurements.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([deviceId, timestampMap]) => {
-        const meter = meters.find(item => item.id === deviceId);
-        const name = getMeterDisplayName(meter, deviceId);
-        const color = getDeviceColor(name);
-        const requiredPhases = expectedPhases.get(deviceId) ?? new Set<number>();
-        const values: (number | null)[] = sortedTimestamps.map(timestamp => {
-          const phases = timestampMap.get(timestamp);
-          if (!phases?.size) return null;
-          // Missing phases are not zero-valued measurements.
-          if ([...requiredPhases].some(metric => !phases.has(metric))) return null;
-          const totalWatts = [...phases.values()].reduce(
-            (sum, reading) => sum + reading.watts,
-            0
-          );
-          return Math.max(0, totalWatts / 1000);
-        });
-        return {
-          label: name,
-          data: values,
-          backgroundColor: color.bg,
-          borderColor: color.border,
-          borderWidth: 2,
-          fill: true,
-          tension: 0,
-          pointRadius: 0,
-          pointHoverRadius: 5,
-          pointHoverBackgroundColor: color.border,
-          pointHoverBorderColor: '#fff',
-          pointHoverBorderWidth: 2,
-          spanGaps: false,
-        };
+    const labels = timestamps.map(time => new Date(time));
+    const datasets = [...samples.entries()].sort(([a], [b]) => a - b).map(([deviceId, deviceBuckets]) => {
+      const meter = meters.find(item => item.id === deviceId);
+      const name = getMeterDisplayName(meter, deviceId);
+      const color = getDeviceColor(name);
+      const data = timestamps.map(timestamp => {
+        const phases = deviceBuckets.get(timestamp);
+        if (!phases?.size) return null;
+        return Math.max(0, [...phases.values()].reduce((sum, phase) => sum + phase.watts, 0) / 1000);
       });
+      return {
+        label: name, data,
+        backgroundColor: color.bg,
+        borderColor: color.border,
+        borderWidth: 1.5,
+        fill: true,
+        tension: 0,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        pointHoverBackgroundColor: color.border,
+        pointHoverBorderColor: '#fff',
+        pointHoverBorderWidth: 2,
+        spanGaps: false,
+      };
+    });
     return { labels, datasets };
   }, [periodData, meters, selectedMeterIds]);
   const chartOptions = useMemo<ChartOptions<'line'>>(() => ({
@@ -677,7 +665,7 @@ export default function PortEnergyOverview() {
       },
       tooltip: {
         enabled: true,
-        mode: 'index',
+        mode: 'nearest',
         intersect: false,
         position: 'nearest',
         backgroundColor: 'rgba(17, 24, 39, 0.97)',
@@ -743,7 +731,7 @@ export default function PortEnergyOverview() {
     scales: {
       x: {
         type: 'time',
-        stacked: true,
+        stacked: false,
         time: {
           displayFormats: {
             minute: 'HH:mm',
@@ -765,7 +753,7 @@ export default function PortEnergyOverview() {
       },
       y: {
         stacked: true,
-        beginAtZero: false,
+        beginAtZero: true,
         suggestedMin: 0,
         grid: {
           color: 'rgba(0, 0, 0, 0.08)',
@@ -889,7 +877,7 @@ export default function PortEnergyOverview() {
             <Activity className="mr-2 h-5 w-5 text-blue-600 dark:text-blue-400" />
             {t.devicePowerDistribution} - {getTimePeriodLabel(timePeriod)}
           </h3>
-          <details className="relative">
+          <details ref={deviceSelectRef} className="relative">
             <summary className="flex min-w-[280px] cursor-pointer list-none items-center justify-between gap-3 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm hover:border-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 [&::-webkit-details-marker]:hidden">
               <span className="max-w-[230px] truncate">{selectedMeterLabel}</span>
               <svg
