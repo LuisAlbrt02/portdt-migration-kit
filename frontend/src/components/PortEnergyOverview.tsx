@@ -3,24 +3,18 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Activity, Clock, Database, PieChart, TrendingUp, Wifi, WifiOff, Zap } from 'lucide-react';
 import { Line } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Legend,
-  TimeScale,
-  Filler,
-  type ChartOptions,
-} from 'chart.js';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, 
+  LineElement, Tooltip, Legend, TimeScale,Filler,type ChartOptions} from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { useTranslation } from '../hooks/useTranslation';
 import { authService } from '../lib/Auth';
 import MetricCard from './dashboard/MetricCard';
+import {  EE_TAG_ID, ACTIVE_POWER_UNIT, POWER_FACTOR_UNIT, POWER_FACTOR_L1, POWER_FACTOR_L2, POWER_FACTOR_L3 } from '../types/EnergyData';
+
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, TimeScale, Filler);
+
 type TimePeriod = '15min' | '30min' | '1hour' | '3hours' | '6hours';
+
 interface Meter {
   id: number;
   idSite: number;
@@ -28,7 +22,9 @@ interface Meter {
   tags: number[];
   extra?: string | { friendlyName?: string } | null;
 }
+
 type SeriesRecord = [number, number, number, string, number];
+
 interface SeriesItem {
   source: string;
   site: number;
@@ -36,22 +32,26 @@ interface SeriesItem {
   metric_type: number;
   records: SeriesRecord[];
 }
+
 interface SeriesResponse {
   start_dtm?: string | null;
   end_dtm?: string | null;
   series: SeriesItem[];
 }
+
 interface DashboardValues {
   totalDevices: number;
   currentTotalPower: number;
   averagePowerFactor: number;
 }
+
 interface AnalyticsValues {
   monthlyEnergy: number;
   maxPower: number;
   topConsumerName: string;
   topConsumerPercentage: number;
 }
+
 interface LoadingState {
   meters: boolean;
   power: boolean;
@@ -59,6 +59,7 @@ interface LoadingState {
   monthlyEnergy: boolean;
   periodAnalytics: boolean;
 }
+
 interface ErrorState {
   meters: string | null;
   power: string | null;
@@ -66,14 +67,13 @@ interface ErrorState {
   monthlyEnergy: string | null;
   periodAnalytics: string | null;
 }
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
-const EE_TAG_ID = 1;
-const ACTIVE_POWER_UNIT = 12;
-const POWER_FACTOR_UNIT = 15;
-const POWER_FACTOR_L1 = 19;
-const POWER_FACTOR_L2 = 20;
-const POWER_FACTOR_L3 = 21;
+
 const LIVE_DATA_MAX_AGE_MINUTES = 3;
+const CHART_STEP_MS = 5_000;
+const MAX_INTERPOLATION_GAP_MS = 5 * 60_000;
+
 function getMeterDisplayName(meter?: Meter, deviceId?: number): string {
   if (!meter) return deviceId !== undefined ? `Device ${deviceId}` : 'Unknown device';
   if (meter.extra) {
@@ -158,7 +158,7 @@ function buildMonthlyEnergyPayload(deviceId: number, siteId: number) {
   };
 }
 function buildPeriodAnalyticsPayload(siteId: number, period: TimePeriod) {
-  const { start_dtm, end_dtm } = getWindow(getTimePeriodMinutes(period));
+  const { start_dtm, end_dtm } = getWindow(getTimePeriodMinutes(period) + 5);
   return {
     start_dtm,
     end_dtm,
@@ -585,51 +585,62 @@ export default function PortEnergyOverview() {
     return `${selectedMeterIds.length} ${t.devicesSelected}`;
   }, [selectedMeterIds, meters, t.selectDevices, t.devicesSelected]);
   const stackedChartData = useMemo(() => {
-    if (!periodData?.series?.length) return { labels: [] as Date[], datasets: [] };
+    if (!periodData?.series?.length || !selectedMeterIds.length) return { labels: [] as Date[], datasets: [] };
     const eeMeter = meters.find(meter => meter.tags?.includes(EE_TAG_ID));
     if (!eeMeter) return { labels: [] as Date[], datasets: [] };
     const selectedIds = new Set(selectedMeterIds);
-    // Align devices into the same time slots so the areas can stack vertically.
-    // Missing readings remain null; they are never treated as measurements of 0 kW.
-    const bucketMs = 60_000;
-    const samples = new Map<number, Map<number, Map<number, { time: number; watts: number }>>>();
+    type Sample = { time: number; watts: number };
+    const devices = new Map<number, Map<number, Sample[]>>();
+    let latestTime = -Infinity;
     for (const series of periodData.series) {
       const deviceId = Number(series.device);
-      const metric = Number(series.metric_type);
-      if (deviceId === eeMeter.id || !selectedIds.has(deviceId) || ![6, 7, 8].includes(metric)) continue;
-      if (!samples.has(deviceId)) samples.set(deviceId, new Map());
-      const deviceBuckets = samples.get(deviceId)!;
+      const phase = Number(series.metric_type);
+      if (deviceId === eeMeter.id || !selectedIds.has(deviceId) || ![6, 7, 8].includes(phase)) continue;
+      if (!devices.has(deviceId)) devices.set(deviceId, new Map());
+      const phases = devices.get(deviceId)!;
+      if (!phases.has(phase)) phases.set(phase, []);
       for (const record of series.records ?? []) {
         const time = new Date(record[3]).getTime();
         const watts = Number(record[4]);
         if (!Number.isFinite(time) || !Number.isFinite(watts)) continue;
-        const bucket = Math.floor(time / bucketMs) * bucketMs;
-        if (!deviceBuckets.has(bucket)) deviceBuckets.set(bucket, new Map());
-        const phases = deviceBuckets.get(bucket)!;
-        const previous = phases.get(metric);
-        if (!previous || time >= previous.time) phases.set(metric, { time, watts });
+        phases.get(phase)!.push({ time, watts });
+        latestTime = Math.max(latestTime, time);
       }
     }
-    // Insert non-measurement timestamps only when a gap exceeds 5 minutes.
-    // They create explicit nulls so Chart.js does not bridge missing intervals.
-    const MAX_GAP_MS = 5 * 60_000;
-    const actualTimestamps = [...new Set([...samples.values()].flatMap(buckets => [...buckets.keys()]))].sort((a, b) => a - b);
+    if (!Number.isFinite(latestTime)) return { labels: [] as Date[], datasets: [] };
+    const periodMs = getTimePeriodMinutes(timePeriod) * 60_000;
+    const end = Math.floor(latestTime / CHART_STEP_MS) * CHART_STEP_MS;
+    const start = end - periodMs;
     const timestamps: number[] = [];
-    actualTimestamps.forEach((timestamp, index) => {
-      if (index > 0 && timestamp - actualTimestamps[index - 1] > MAX_GAP_MS) {
-        timestamps.push(actualTimestamps[index - 1] + (timestamp - actualTimestamps[index - 1]) / 2);
-      }
-      timestamps.push(timestamp);
-    });
+    for (let time = start; time <= end; time += CHART_STEP_MS) timestamps.push(time);
     const labels = timestamps.map(time => new Date(time));
-    const datasets = [...samples.entries()].sort(([a], [b]) => a - b).map(([deviceId, deviceBuckets]) => {
+    const datasets = [...devices.entries()].sort(([a], [b]) => a - b).map(([deviceId, phaseSamples]) => {
       const meter = meters.find(item => item.id === deviceId);
       const name = getMeterDisplayName(meter, deviceId);
       const color = getDeviceColor(name);
-      const data = timestamps.map(timestamp => {
-        const phases = deviceBuckets.get(timestamp);
-        if (!phases?.size) return null;
-        return Math.max(0, [...phases.values()].reduce((sum, phase) => sum + phase.watts, 0) / 1000);
+      const phaseData = [...phaseSamples.values()].map(readings => {
+        readings.sort((a, b) => a.time - b.time);
+        let index = 0;
+        return timestamps.map(timestamp => {
+          while (index < readings.length && readings[index].time < timestamp) index++;
+          const next = readings[index];
+          if (next?.time === timestamp) return next.watts;
+          const previous = readings[index - 1];
+          if (!previous) return null;
+          // interpolation between points (MAXIMUM 5 MINUTES GAP)
+          if (next) {
+            const gap = next.time - previous.time;
+            if (gap > MAX_INTERPOLATION_GAP_MS || gap <= 0) return null;
+            const ratio = (timestamp - previous.time) / gap;
+            return previous.watts + (next.watts - previous.watts) * ratio;
+          }
+          return timestamp - previous.time <= MAX_INTERPOLATION_GAP_MS ? previous.watts : null;
+        });
+      });
+      const data = timestamps.map((_, index) => {
+        const watts = phaseData.map(phase => phase[index]);
+        if (!watts.length || watts.some(value => value === null)) return null;
+        return Math.max(0, watts.reduce<number>((sum, value) => sum + (value ?? 0), 0) / 1000);
       });
       return {
         label: name, data,
@@ -647,7 +658,7 @@ export default function PortEnergyOverview() {
       };
     });
     return { labels, datasets };
-  }, [periodData, meters, selectedMeterIds]);
+  }, [periodData, meters, selectedMeterIds, timePeriod]);
   const chartOptions = useMemo<ChartOptions<'line'>>(() => ({
     responsive: true,
     maintainAspectRatio: false,
