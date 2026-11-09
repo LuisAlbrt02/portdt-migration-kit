@@ -572,13 +572,12 @@ export const translations = {
     shift2dcVisitWebsite: 'Visit SHIFT2DC Website',
 
     // SHIFT2DC Electrical Diagram
-    shift2dcDiagramTitle: 'Single Line Diagram - Funchal Port',
-    shift2dcDiagramSubtitle: 'SHIFT2DC Demonstrator Electrical Distribution Scheme',
-    shift2dcElectricalGrid: 'ELECTRICAL GRID (Utility Grid)',
+    shift2dcDiagramTitle: 'Electrical Distribution Diagram - Funchal Port',
+    shift2dcElectricalGrid: 'Electrical Grid',
     shift2dcTransformer: 'Transformer',
     shift2dcMainEntry: 'Main Entry',
     shift2dcEmergencyGenerator: 'Emergency Generator',
-    shift2dcBackup: 'backup',
+    shift2dcBackup: 'Backup',
     shift2dcMainSwitchboard: 'Main Switchboard',
     shift2dcEmergencyPower: 'Emergency Power',
     shift2dcPhysical: 'PHYSICAL',
@@ -590,7 +589,7 @@ export const translations = {
     shift2dcEmergency: 'Emergency',
     shift2dcDemonstrator: 'Demonstrator',
     shift2dcMain: 'Main',
-    shift2dcSingleLineDiagram: 'SINGLE LINE DIAGRAM',
+    shift2dcSingleLineDiagram: 'Electrical Distribution Diagram',
     shift2dcElectricalDistribution: 'Electrical Distribution',
     shift2dcElectricalComponent: 'Electrical system component.',
     shift2dcControls: 'Controls',
@@ -598,10 +597,53 @@ export const translations = {
     shift2dcDragMove: 'Drag = move',
     shift2dcEquipment: 'Equipment',
     shift2dcCircuitBreakers: 'Circuit Breakers',
+
+   // Grid Architecture
+    gridArchitecture: 'Grid Architecture',
+    gridArchitectureSubtitle: 'Port of Funchal · Electrical Infrastructure',
+    gridArchitectureDescription: 'Explore the electrical distribution architecture of the Port of Funchal, including its main switchboard, normal and emergency circuits, physical demonstrator, and available power measurements.',
+
+    gridOverviewTitle: 'Electrical Infrastructure Overview',
+    gridOverviewDescription: "The electrical grid architecture describes the organization of the port's electrical supply and distribution system. The interactive diagram provides a structured representation of electrical switchboards, distribution circuits, and demonstrator equipment. Power values are displayed where corresponding measurements are available from the data platform.",
+
+    gridMainSwitchboard: 'Main Switchboard',
+    gridMainSwitchboardDescription: 'Main normal and emergency distribution',
+    gridMainDistribution: 'Main Electrical Distribution',
+    gridMainDistributionDescription: 'The main switchboard (QGBT N+E) represents the central distribution point connecting the electrical supply to the port distribution boards.',
+
+    gridNormalDistribution: 'Normal Distribution',
+    gridNormalDistributionDescription: 'QGED (N) supplies the normal distribution circuits (D1–D14) and the Q.DEMONSTRADOR equipment.',
+    gridNormalCircuitsDescription: '14 distribution circuits · D1–D14',
+
+    gridEmergencyDistribution: 'Emergency Distribution',
+    gridEmergencyDistributionDescription: 'QGED (E) represents the emergency distribution circuits (D15–D31), including the alternative backup supply path.',
+    gridEmergencyCircuitsDescription: '17 distribution circuits · D15–D31',
+
+    gridPhysicalDemonstrator: 'Physical Demonstrator',
+    gridPhysicalDemonstratorDescription: 'The demonstrator includes six equipment groups associated with electrical consumption, photovoltaic production, charging and storage.',
+    gridDemonstratorCircuitsDescription: '6 equipment groups · Normal distribution',
+
+    gridComponentsTitle: 'Electrical Distribution Components',
+
+    gridHistoricalDataTitle: 'Historical Power Data',
+    gridHistoricalDataDescription: 'Analyze historical electrical measurements from the Port of Funchal, explore individual meters and compare power profiles over different time periods.',
+    gridHistoricalDataLink: 'Explore Historical Port Data',
+
+    gridShift2dcTitle: 'Shift2DC Port Demonstrator',
+    gridShift2dcDescription: 'Learn about the Shift2DC research project, the Port of Funchal demonstrator, and the research activities associated with DC distribution technologies and digital twins.',
+    gridShift2dcLink: 'Explore Shift2DC',
+
+    gridDataDisclaimer: 'Note: The diagram represents the configured electrical architecture. Displayed power values depend on available measurements. A connection shown in the diagram does not, by itself, confirm that a device is currently energized or operating.',
+
+    // Shift2DC - Grid Architecture link
+    shift2dcGridArchitectureTitle: 'Port Electrical Grid Architecture',
+    shift2dcGridArchitectureDescription: 'Explore the electrical distribution network, switchboards, circuits and available power measurements in the Port Digital Twin.',
+    shift2dcGridArchitectureLink: 'Grid Architecture',
+
   },
   pt: {
     // Sidebar navigation
-    dashboard: 'Painel',
+    dashboard: 'Dashboard',
     portMap: 'Mapa do Porto',
     simulation: 'Simulação',
     historicalPortData: 'Dados Históricos do Porto',
@@ -1170,13 +1212,12 @@ export const translations = {
     shift2dcVisitWebsite: 'Visitar o Website do SHIFT2DC',
 
     // SHIFT2DC Electrical Diagram
-    shift2dcDiagramTitle: 'Diagrama Unifilar - Porto do Funchal',
-    shift2dcDiagramSubtitle: 'Esquema de Distribuição Elétrica do Demonstrador SHIFT2DC',
-    shift2dcElectricalGrid: 'REDE ELÉTRICA (Rede Pública)',
+    shift2dcDiagramTitle: 'Diagrama de Distribuição Elétrica - Porto do Funchal',
+    shift2dcElectricalGrid: 'Rede Elétrica',
     shift2dcTransformer: 'Transformador',
     shift2dcMainEntry: 'Entrada Principal',
     shift2dcEmergencyGenerator: 'Gerador de Emergência',
-    shift2dcBackup: 'reserva',
+    shift2dcBackup: 'Reserva',
     shift2dcMainSwitchboard: 'Quadro Geral',
     shift2dcEmergencyPower: 'Alimentação de Emergência',
     shift2dcPhysical: 'FÍSICO',
@@ -1188,7 +1229,7 @@ export const translations = {
     shift2dcEmergency: 'Emergência',
     shift2dcDemonstrator: 'Demonstrador',
     shift2dcMain: 'Principal',
-    shift2dcSingleLineDiagram: 'DIAGRAMA UNIFILAR',
+    shift2dcSingleLineDiagram: 'Diagrama de Distribuição Elétrica',
     shift2dcElectricalDistribution: 'Distribuição Elétrica',
     shift2dcElectricalComponent: 'Componente do sistema elétrico.',
     shift2dcControls: 'Controlos',
@@ -1196,6 +1237,48 @@ export const translations = {
     shift2dcDragMove: 'Arrastar = mover',
     shift2dcEquipment: 'Equipamentos',
     shift2dcCircuitBreakers: 'Disjuntores',
+  
+    // Grid Architecture
+    gridArchitecture: 'Arquitetura da Rede Elétrica',
+    gridArchitectureSubtitle: 'Porto do Funchal · Infraestrutura Elétrica',
+    gridArchitectureDescription: 'Explore a arquitetura de distribuição elétrica do Porto do Funchal, incluindo o quadro geral, os circuitos normais e de emergência, o demonstrador físico e as medições de potência disponíveis.',
+
+    gridOverviewTitle: 'Visão Geral da Infraestrutura Elétrica',
+    gridOverviewDescription: 'A arquitetura da rede elétrica descreve a organização do sistema de alimentação e distribuição elétrica do porto. O diagrama interativo apresenta uma representação estruturada dos quadros elétricos, circuitos de distribuição e equipamentos do demonstrador. Os valores de potência são apresentados quando existem medições correspondentes disponíveis na plataforma de dados.',
+
+    gridMainSwitchboard: 'Quadro Geral de Baixa Tensão',
+    gridMainSwitchboardDescription: 'Distribuição principal normal e de emergência',
+    gridMainDistribution: 'Distribuição Elétrica Principal',
+    gridMainDistributionDescription: 'O quadro geral (QGBT N+E) representa o ponto central de distribuição que liga a alimentação elétrica aos quadros de distribuição do porto.',
+
+    gridNormalDistribution: 'Distribuição Normal',
+    gridNormalDistributionDescription: 'O QGED (N) alimenta os circuitos de distribuição normal (D1–D14) e os equipamentos do Q.DEMONSTRADOR.',
+    gridNormalCircuitsDescription: '14 circuitos de distribuição · D1–D14',
+
+    gridEmergencyDistribution: 'Distribuição de Emergência',
+    gridEmergencyDistributionDescription: 'O QGED (E) representa os circuitos de distribuição de emergência (D15–D31), incluindo o percurso de alimentação alternativa de reserva.',
+    gridEmergencyCircuitsDescription: '17 circuitos de distribuição · D15–D31',
+
+    gridPhysicalDemonstrator: 'Demonstrador Físico',
+    gridPhysicalDemonstratorDescription: 'O demonstrador inclui seis grupos de equipamentos associados ao consumo elétrico, à produção fotovoltaica, ao carregamento e ao armazenamento de energia.',
+    gridDemonstratorCircuitsDescription: '6 grupos de equipamentos · Distribuição normal',
+
+    gridComponentsTitle: 'Componentes da Distribuição Elétrica',
+
+    gridHistoricalDataTitle: 'Dados Históricos de Potência',
+    gridHistoricalDataDescription: 'Analise as medições elétricas históricas do Porto do Funchal, explore os contadores individuais e compare perfis de potência em diferentes períodos.',
+    gridHistoricalDataLink: 'Explorar Dados Históricos do Porto',
+
+    gridShift2dcTitle: 'Demonstrador Portuário Shift2DC',
+    gridShift2dcDescription: 'Conheça o projeto de investigação Shift2DC, o demonstrador do Porto do Funchal e as atividades de investigação relacionadas com tecnologias de distribuição em corrente contínua e gémeos digitais.',
+    gridShift2dcLink: 'Explorar Shift2DC',
+
+    gridDataDisclaimer: 'Nota: O diagrama representa a arquitetura elétrica configurada. Os valores de potência apresentados dependem das medições disponíveis. Uma ligação representada no diagrama não confirma, por si só, que um equipamento esteja atualmente energizado ou em funcionamento.',
+
+    // Shift2DC - Grid Architecture link
+    shift2dcGridArchitectureTitle: 'Arquitetura da Rede Elétrica do Porto',
+    shift2dcGridArchitectureDescription: 'Explore a rede de distribuição elétrica, os quadros elétricos, os circuitos e as medições de potência disponíveis no Gémeo Digital do Porto.',
+    shift2dcGridArchitectureLink: 'Arquitetura da Rede Elétrica',
   }
 };
 

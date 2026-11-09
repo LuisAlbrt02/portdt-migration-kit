@@ -1,18 +1,32 @@
+
 'use client';
 
+import Link from 'next/link';
+import Image from 'next/image';
 import {
+  ArrowRight,
   Building,
   Euro,
   ExternalLink,
   Factory,
   Globe,
   MapPin,
+  Network,
   Ship,
   Users,
   Zap,
 } from 'lucide-react';
-import ElectricalDiagram from '../../components/GridDocumentation/ElectricDiagram';
+
 import { useTranslation } from '../../hooks/useTranslation';
+
+const partners = [
+  { name: 'APRAM', src: '/partners/apram.svg' },
+  { name: 'INESC-ID', src: '/partners/inesc-id.svg' },
+  { name: 'EDP', src: '/partners/edp.svg' },
+  { name: 'EDF', src: '/partners/edf.svg' },
+  { name: 'Fincantieri', src: '/partners/fincantieri.svg' },
+  { name: 'CIRCE', src: '/partners/circe.svg' },
+];
 
 export default function SHIFT2DCPage() {
   const t = useTranslation();
@@ -54,33 +68,38 @@ export default function SHIFT2DCPage() {
 
   return (
     <div className="p-6">
-      <div className="mb-8 mt-3">
+      {/* Page Header */}
+      <header className="mb-8 mt-3">
         <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-200">
           {t.shift2dcProjectTitle}
         </h1>
         <p className="mt-2 text-gray-600 dark:text-gray-400">
           {t.shift2dcProjectSubtitle}
         </p>
-      </div>
+      </header>
 
       <div className="space-y-12">
-        <div className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
+        {/* Project Introduction */}
+        <section className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
           <p className="mx-auto max-w-3xl text-center text-lg leading-relaxed text-gray-600 dark:text-gray-400">
             {t.shift2dcIntro}
           </p>
-        </div>
+        </section>
 
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        {/* Project Indicators */}
+        <section className="grid grid-cols-1 gap-6 md:grid-cols-3">
           <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-md dark:border-gray-700 dark:bg-gray-800">
             <div className="flex items-center">
               <div className="rounded-lg bg-green-500 p-3 dark:bg-green-600">
                 <Euro className="h-6 w-6 text-white" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                <p className="text-base font-medium text-gray-600 dark:text-gray-400">
                   {t.shift2dcProjectFunding}
                 </p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">€11M+</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  €11M+
+                </p>
               </div>
             </div>
           </div>
@@ -91,10 +110,12 @@ export default function SHIFT2DCPage() {
                 <Users className="h-6 w-6 text-white" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                <p className="text-base font-medium text-gray-600 dark:text-gray-400">
                   {t.shift2dcPartners}
                 </p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">33</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  33
+                </p>
               </div>
             </div>
           </div>
@@ -105,16 +126,19 @@ export default function SHIFT2DCPage() {
                 <Globe className="h-6 w-6 text-white" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                <p className="text-base font-medium text-gray-600 dark:text-gray-400">
                   {t.shift2dcCountries}
                 </p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">12</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  12
+                </p>
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
+        {/* Project Overview */}
+        <section className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
           <div className="mb-6 flex items-center">
             <Zap className="mr-3 h-6 w-6 text-blue-600 dark:text-blue-400" />
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -146,8 +170,8 @@ export default function SHIFT2DCPage() {
                   t.shift2dcFeature3,
                   t.shift2dcFeature4,
                 ].map((feature, index) => (
-                  <li key={feature} className="flex items-start">
-                    <span className="mr-3 mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
+                  <li key={index} className="flex items-start">
+                    <span className="mr-3 mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-base font-bold text-white">
                       {index + 1}
                     </span>
                     {feature}
@@ -156,12 +180,14 @@ export default function SHIFT2DCPage() {
               </ul>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
+        {/* European Demonstrators */}
+        <section className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
           <h2 className="mb-4 text-2xl font-bold text-gray-900 dark:text-white">
             {t.shift2dcFourDemonstrators}
           </h2>
+
           <p className="mb-8 text-gray-600 dark:text-gray-400">
             {t.shift2dcDemonstratorsDescription}
           </p>
@@ -171,12 +197,17 @@ export default function SHIFT2DCPage() {
               <div
                 key={index}
                 className={`rounded-lg bg-gray-50 p-6 transition-all hover:shadow-md dark:bg-gray-700 ${
-                  demo.highlight ? 'ring-2 ring-blue-500 dark:ring-blue-400' : ''
+                  demo.highlight
+                    ? 'ring-2 ring-blue-500 dark:ring-blue-400'
+                    : ''
                 }`}
               >
-                <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-lg ${demo.color}`}>
+                <div
+                  className={`mb-4 flex h-12 w-12 items-center justify-center rounded-lg ${demo.color}`}
+                >
                   <demo.icon className="h-6 w-6 text-white" />
                 </div>
+
                 <h3
                   className={`mb-2 text-lg font-semibold ${
                     demo.highlight
@@ -186,27 +217,33 @@ export default function SHIFT2DCPage() {
                 >
                   {demo.title}
                 </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">{demo.description}</p>
+
+                <p className="text-base text-gray-600 dark:text-gray-400">
+                  {demo.description}
+                </p>
 
                 {demo.highlight && (
-                  <div className="mt-3 rounded bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                  <div className="mt-3 rounded bg-blue-100 px-2 py-1 text-sm font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                     {t.shift2dcCurrentDemonstrator}
                   </div>
                 )}
               </div>
             ))}
           </div>
-        </div>
+        </section>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
+        {/* Port Demonstrator */}
+        <section className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
           <div className="mb-6 flex items-center">
             <div className="mr-4 rounded-lg bg-blue-500 p-3 dark:bg-blue-600">
               <Ship className="h-6 w-6 text-white" />
             </div>
+
             <div>
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
                 {t.shift2dcPortDemonstrator}
               </h2>
+
               <div className="mt-1 flex items-center text-gray-600 dark:text-gray-400">
                 <MapPin className="mr-1 h-4 w-4" />
                 <span className="text-sm">{t.shift2dcLocation}</span>
@@ -219,6 +256,7 @@ export default function SHIFT2DCPage() {
               <h3 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
                 {t.shift2dcDigitalTwinApplication}
               </h3>
+
               <p className="mb-6 leading-relaxed text-gray-600 dark:text-gray-400">
                 {t.shift2dcDigitalTwinDescription}
               </p>
@@ -227,7 +265,8 @@ export default function SHIFT2DCPage() {
                 <h4 className="mb-3 font-semibold text-gray-900 dark:text-white">
                   {t.shift2dcPortInfrastructure}
                 </h4>
-                <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+
+                <ul className="space-y-2 text-base text-gray-600 dark:text-gray-400">
                   <li>• {t.shift2dcCruiseTerminals}</li>
                   <li>• {t.shift2dcFerryTerminal}</li>
                   <li>• {t.shift2dcWarshipTerminal}</li>
@@ -239,6 +278,7 @@ export default function SHIFT2DCPage() {
                 <h4 className="mb-2 font-semibold text-amber-800 dark:text-amber-200">
                   {t.shift2dcKeyChallenge}
                 </h4>
+
                 <p className="text-sm text-amber-700 dark:text-amber-300">
                   {t.shift2dcKeyChallengeDescription}
                 </p>
@@ -252,10 +292,14 @@ export default function SHIFT2DCPage() {
 
               <div className="space-y-4">
                 {useCases.map((useCase, index) => (
-                  <div key={index} className="rounded-lg bg-gray-50 p-4 dark:bg-gray-700">
-                    <h4 className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">
+                  <div
+                    key={index}
+                    className="rounded-lg bg-gray-50 p-4 dark:bg-gray-700"
+                  >
+                    <h4 className="mb-2 text-base font-semibold text-gray-900 dark:text-white">
                       UC{index + 1}: {useCase.title}
                     </h4>
+
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {useCase.description}
                     </p>
@@ -264,89 +308,99 @@ export default function SHIFT2DCPage() {
               </div>
             </div>
           </div>
-        </div>
 
-        <ElectricalDiagram />
-
-        <div className="grid gap-8 md:grid-cols-2">
-          <div className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
-            <div className="mb-6 flex items-center">
-              <Users className="mr-3 h-6 w-6 text-blue-600 dark:text-blue-400" />
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                {t.shift2dcLeadershipPartners}
-              </h2>
-            </div>
-
-            <div className="space-y-6">
-              <div>
-                <h3 className="mb-3 text-lg font-semibold text-gray-900 dark:text-white">
-                  {t.shift2dcDemoLeadership}
-                </h3>
-                <div className="rounded-lg bg-gray-50 p-4 dark:bg-gray-700">
-                  <p className="mb-2 text-sm text-gray-600 dark:text-gray-400">
-                    <strong>{t.shift2dcDemoLeader}:</strong> ITI (Instituto Tecnológico de Informática)
-                  </p>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    <strong>{t.shift2dcCoordination}:</strong> INESC-ID (Portuguese Research & Innovation Institute)
-                  </p>
-                </div>
-              </div>
+          {/* Grid Architecture Link */}
+          <div className="mt-8 flex flex-col gap-4 rounded-xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-900 dark:bg-blue-900/20 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <Network className="mt-1 h-6 w-6 shrink-0 text-blue-600 dark:text-blue-400" />
 
               <div>
-                <h3 className="mb-3 text-lg font-semibold text-gray-900 dark:text-white">
-                  {t.shift2dcKeyParticipants}
+                <h3 className="font-bold text-gray-900 dark:text-white">
+                  {t.shift2dcGridArchitectureTitle}
                 </h3>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  {['APRAM', 'INESC ID', 'EDP NEW', 'FINCANTIERI', 'CIRCE', 'EDF'].map(partner => (
-                    <div key={partner} className="rounded bg-gray-50 px-3 py-2 text-center dark:bg-gray-700">
-                      <span className="font-medium text-gray-600 dark:text-gray-400">{partner}</span>
-                    </div>
-                  ))}
-                </div>
+
+                <p className="mt-1 max-w-2xl text-sm text-gray-600 dark:text-gray-400">
+                  {t.shift2dcGridArchitectureDescription}
+                </p>
               </div>
             </div>
+
+            <Link
+              href="/grid-architecture"
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+            >
+              {t.shift2dcGridArchitectureLink}
+              <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
+        </section>
 
-          <div className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
-            <h2 className="mb-6 text-2xl font-bold text-gray-900 dark:text-white">
-              {t.shift2dcImplementationPhases}
+        {/* Leadership & Partners */}
+        <section className="rounded-lg border border-gray-200 bg-white p-8 shadow-md dark:border-gray-700 dark:bg-gray-800">
+          <div className="mb-6 flex items-center">
+            <Users className="mr-3 h-6 w-6 text-blue-600 dark:text-blue-400" />
+
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+              {t.shift2dcLeadershipPartners}
             </h2>
+          </div>
 
-            <div className="space-y-4">
-              <div className="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
-                <h3 className="mb-2 text-lg font-semibold text-green-800 dark:text-green-400">
-                  {t.shift2dcPhase1Title}
-                </h3>
-                <p className="text-sm text-green-700 dark:text-green-300">
-                  {t.shift2dcPhase1Description}
+          <div className="space-y-8">
+            {/* Demonstrator Leadership */}
+            <div>
+              <h3 className="mb-3 text-xl font-semibold text-gray-900 dark:text-white">
+                {t.shift2dcDemoLeadership}
+              </h3>
+
+              <div className="rounded-xl bg-gray-50 p-4 dark:bg-gray-700">
+                <p className="mb-2 text-lg text-gray-600 dark:text-gray-400">
+                  <strong>{t.shift2dcDemoLeader}:</strong>{' '}
+                  ITI (Instituto Tecnológico de Informática)
                 </p>
-              </div>
 
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
-                <h3 className="mb-2 text-lg font-semibold text-blue-800 dark:text-blue-400">
-                  {t.shift2dcPhase2Title}
-                </h3>
-                <p className="text-sm text-blue-700 dark:text-blue-300">
-                  {t.shift2dcPhase2Description}
-                </p>
-              </div>
-
-              <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 dark:border-purple-800 dark:bg-purple-900/20">
-                <h3 className="mb-2 text-lg font-semibold text-purple-800 dark:text-purple-400">
-                  {t.shift2dcValidationTitle}
-                </h3>
-                <p className="text-sm text-purple-700 dark:text-purple-300">
-                  {t.shift2dcValidationDescription}
+                <p className="text-lg text-gray-600 dark:text-gray-400">
+                  <strong>{t.shift2dcCoordination}:</strong>{' '}
+                  INESC-ID (Portuguese Research & Innovation Institute)
                 </p>
               </div>
             </div>
-          </div>
-        </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center shadow-md dark:border-gray-700 dark:bg-gray-800">
+            
+            {/* Partner Logos */}
+            <div>
+              <h3 className="mb-4 text-xl font-semibold text-gray-900 dark:text-white">
+                {t.shift2dcKeyParticipants}
+              </h3>
+
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+                {partners.map((partner) => (
+                  <div
+                    key={partner.name}
+                    className="flex min-h-[140px] items-center justify-center rounded-lg border border-gray-200 bg-white p-4 transition-all duration-200 hover:border-blue-300 hover:shadow-md"
+                  >
+                    <div className="relative h-24 w-full">
+                      <Image
+                        src={partner.src}
+                        alt={partner.name}
+                        fill
+                        sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 16vw"
+                        className="object-contain"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        {/* Sustainable Future */}
+        <section className="rounded-lg border border-gray-200 bg-white p-8 text-center shadow-md dark:border-gray-700 dark:bg-gray-800">
           <h2 className="mb-4 text-2xl font-bold text-gray-900 dark:text-white">
             {t.shift2dcSustainableFuture}
           </h2>
+
           <p className="mx-auto mb-6 max-w-2xl text-gray-600 dark:text-gray-400">
             {t.shift2dcSustainableFutureDescription}
           </p>
@@ -360,7 +414,7 @@ export default function SHIFT2DCPage() {
             {t.shift2dcVisitWebsite}
             <ExternalLink className="ml-2 h-4 w-4" />
           </a>
-        </div>
+        </section>
       </div>
     </div>
   );

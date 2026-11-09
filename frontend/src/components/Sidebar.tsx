@@ -12,6 +12,7 @@ import {
   Map,
   Moon,
   Sun,
+  Zap
 } from 'lucide-react';
 
 import { useTheme } from '../contexts/ThemeContext';
@@ -43,6 +44,11 @@ export default function Sidebar() {
       name: t.historicalPortData,
       href: '/historical-data',
       icon: Database,
+    },
+    {
+      name: t.gridArchitecture,
+      href: '/grid-architecture',
+      icon: Zap,
     },
   ];
 
