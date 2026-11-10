@@ -19,17 +19,17 @@ const YACHT_SCALE = 0.003;
 
 // Cruise ship scales based on length
 const CRUISE_SCALE = [
-  { min: 100, max: 125, scale: 0.0055 },
-  { min: 125, max: 150, scale: 0.0060 },
+  { min: 100, max: 125, scale: 0.0050 },
+  { min: 125, max: 150, scale: 0.0055 },
   { min: 150, max: 175, scale: 0.0065 },
   { min: 175, max: 200, scale: 0.0070 },
   { min: 200, max: 225, scale: 0.0075 },
   { min: 225, max: 250, scale: 0.0080 },
-  { min: 250, max: 275, scale: 0.0085 },
-  { min: 275, max: 300, scale: 0.0090 },
-  { min: 300, max: 325, scale: 0.0095 },
-  { min: 325, max: 350, scale: 0.0100 },
-  { min: 350, max: 400, scale: 0.0110 },
+  { min: 250, max: 275, scale: 0.0090 },
+  { min: 275, max: 300, scale: 0.0100 },
+  { min: 300, max: 325, scale: 0.0110 },
+  { min: 325, max: 350, scale: 0.0120 },
+  { min: 350, max: 400, scale: 0.0130 },
 ];
 
 export function getBoatVisualType(
