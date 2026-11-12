@@ -1,19 +1,27 @@
 'use client';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Activity, Clock, Database, PieChart, TrendingUp, Wifi, WifiOff, Zap } from 'lucide-react';
-import { Line } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, 
-  LineElement, Tooltip, Legend, TimeScale,Filler,type ChartOptions} from 'chart.js';
-import 'chartjs-adapter-date-fns';
+import { Activity, CircleArrowUpRightExit, Database, PieChart, Sun, TrendingUp, Wifi, WifiOff, Zap } from 'lucide-react';
 import { useTranslation } from '../hooks/useTranslation';
 import { authService } from '../lib/Auth';
 import MetricCard from './dashboard/MetricCard';
-import {  EE_TAG_ID, ACTIVE_POWER_UNIT, POWER_FACTOR_UNIT, POWER_FACTOR_L1, POWER_FACTOR_L2, POWER_FACTOR_L3 } from '../types/EnergyData';
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, TimeScale, Filler);
-
-type TimePeriod = '15min' | '30min' | '1hour' | '3hours' | '6hours';
+import PowerChart from './dashboard/PowerChart';
+import PVChart from './dashboard/PVChart';
+import TimeSelector, { type TimePeriod, getTimePeriodMinutes } from './dashboard/TimeSelector';
+import { EE_TAG_ID, 
+  ACTIVE_POWER_UNIT, 
+  POWER_FACTOR_UNIT, 
+  POWER_FACTOR_L1, 
+  POWER_FACTOR_L2, 
+  POWER_FACTOR_L3, 
+  PORT_SITE_ID, 
+  PORT_PORT_TYPE, 
+  BUILDING_SITE_TYPE, 
+  PV_DEVICE_ID, 
+  PV_POWER_MEAN, 
+  INTERLINK_DEVICE_ID, 
+  GRID_ACTIVE_POWER 
+} from '../types/EnergyData';
 
 interface Meter {
   id: number;
@@ -26,8 +34,8 @@ interface Meter {
 type SeriesRecord = [number, number, number, string, number];
 
 interface SeriesItem {
-  source: string;
-  site: number;
+  source?: string;
+  site?: number;
   device: number;
   metric_type: number;
   records: SeriesRecord[];
@@ -50,6 +58,8 @@ interface AnalyticsValues {
   maxPower: number;
   topConsumerName: string;
   topConsumerPercentage: number;
+  solarGeneratedToday: number;
+  exportedToGridToday: number;
 }
 
 interface LoadingState {
@@ -58,21 +68,22 @@ interface LoadingState {
   powerFactor: boolean;
   monthlyEnergy: boolean;
   periodAnalytics: boolean;
+  solarEnergy: boolean;
 }
 
-interface ErrorState {
-  meters: string | null;
-  power: string | null;
-  powerFactor: string | null;
-  monthlyEnergy: string | null;
-  periodAnalytics: string | null;
-}
+type ErrorState = Record<keyof LoadingState, string | null>;
+
+type EnergySample = {
+  time: number;
+  watts: number;
+};
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
-
+const ACTIVE_POWER_PHASE_METRICS: readonly number[] = [6, 7, 8];
 const LIVE_DATA_MAX_AGE_MINUTES = 3;
-const CHART_STEP_MS = 5_000;
-const MAX_INTERPOLATION_GAP_MS = 5 * 60_000;
+const MAX_ENERGY_GAP_MS = 5 * 60_000;
+const PV_SIGN = -1;
+const EXPORT_SIGN = 1;
 
 function getMeterDisplayName(meter?: Meter, deviceId?: number): string {
   if (!meter) return deviceId !== undefined ? `Device ${deviceId}` : 'Unknown device';
@@ -80,748 +91,393 @@ function getMeterDisplayName(meter?: Meter, deviceId?: number): string {
     try {
       const extra = typeof meter.extra === 'string' ? JSON.parse(meter.extra) : meter.extra;
       if (typeof extra?.friendlyName === 'string' && extra.friendlyName.trim()) return extra.friendlyName.trim();
-    } catch {
-      console.warn(`Could not parse extra for meter ${meter.id}`);
-    }
+    } catch {}
   }
   return meter.name || `Device ${meter.id}`;
 }
-function getTimePeriodMinutes(period: TimePeriod): number {
-  switch (period) {
-    case '15min': return 15;
-    case '30min': return 30;
-    case '1hour': return 60;
-    case '3hours': return 180;
-    case '6hours': return 360;
-  }
-}
+
 function getWindow(minutes: number) {
-  const end = new Date();
-  const start = new Date(end.getTime() - minutes * 60 * 1000);
+  const end = new Date(), start = new Date(end.getTime() - minutes * 60_000);
   return { start_dtm: start.toISOString(), end_dtm: end.toISOString() };
 }
-function getLiveWindow() {
-  return getWindow(LIVE_DATA_MAX_AGE_MINUTES);
-}
-function getMonthlyWindow() {
-  return getWindow(30 * 24 * 60);
-}
-function buildPowerPayload(deviceId: number, siteId: number) {
-  const { start_dtm, end_dtm } = getLiveWindow();
+
+function buildSeriesPayload(minutes: number, options: {
+  device?: number[]; deviceType?: string[]; metrics?: number[]; units?: number[];
+}) {
   return {
-    start_dtm,
-    end_dtm,
+    ...getWindow(minutes),
     series: [{
-      sources: ['data_lake'],
-      site: [siteId],
-      site_type: ['port'],
-      device: [deviceId],
-      device_type: [],
-      metric_type: [0],
-      unit: [ACTIVE_POWER_UNIT],
-      field: 'default',
-    }],
+      sources: ['data_lake'], site: [PORT_SITE_ID], site_type: [PORT_PORT_TYPE],
+      device: options.device ?? [], device_type: options.deviceType ?? [],
+      metric_type: options.metrics ?? [0], unit: options.units ?? [ACTIVE_POWER_UNIT], field: 'default'
+    }]
   };
 }
-function buildPowerFactorPayload(siteId: number) {
-  const { start_dtm, end_dtm } = getLiveWindow();
+
+function buildTodayPayload() {
+  const end = new Date(), start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
   return {
-    start_dtm,
-    end_dtm,
-    series: [{
-      sources: ['data_lake'],
-      site: [siteId],
-      site_type: ['port'],
-      device: [],
-      device_type: ['meter'],
-      metric_type: [POWER_FACTOR_L1, POWER_FACTOR_L2, POWER_FACTOR_L3],
-      unit: [POWER_FACTOR_UNIT],
-      field: 'default',
-    }],
+    start_dtm: start.toISOString(), end_dtm: end.toISOString(),
+    series: [
+      { sources: ['data_lake'], site: [PORT_SITE_ID], site_type: [BUILDING_SITE_TYPE], device: [PV_DEVICE_ID], device_type: ['meter'], metric_type: [PV_POWER_MEAN], unit: [0], field: 'default' },
+      { sources: ['data_lake'], site: [PORT_SITE_ID], site_type: [BUILDING_SITE_TYPE], device: [INTERLINK_DEVICE_ID], device_type: ['meter'], metric_type: [GRID_ACTIVE_POWER], unit: [0], field: 'default' }
+    ]
   };
 }
-function buildMonthlyEnergyPayload(deviceId: number, siteId: number) {
-  const { start_dtm, end_dtm } = getMonthlyWindow();
-  return {
-    start_dtm,
-    end_dtm,
-    series: [{
-      sources: ['data_lake'],
-      site: [siteId],
-      site_type: ['port'],
-      device: [deviceId],
-      device_type: [],
-      metric_type: [0],
-      unit: [ACTIVE_POWER_UNIT],
-      field: 'default',
-    }],
-  };
-}
-function buildPeriodAnalyticsPayload(siteId: number, period: TimePeriod) {
-  const { start_dtm, end_dtm } = getWindow(getTimePeriodMinutes(period) + 5);
-  return {
-    start_dtm,
-    end_dtm,
-    series: [{
-      sources: ['data_lake'],
-      site: [siteId],
-      site_type: ['port'],
-      device: [],
-      device_type: ['meter'],
-      metric_type: [0],
-      unit: [ACTIVE_POWER_UNIT],
-      field: 'default',
-    }],
-  };
-}
+
 function getLatestValue(series: SeriesItem): number | undefined {
   if (!series.records?.length) return undefined;
-  const value = series.records[series.records.length - 1][4];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  const value = Number(series.records[series.records.length - 1][4]);
+  return Number.isFinite(value) ? value : undefined;
 }
+
 function calculateCurrentTotalPower(data: SeriesResponse, eeDeviceId: number): number {
-  if (!Array.isArray(data.series)) return 0;
-  const values = data.series
-    .filter(series => series.device === eeDeviceId && [6, 7, 8].includes(series.metric_type))
-    .map(getLatestValue)
-    .filter((value): value is number => value !== undefined);
-  if (!values.length) return 0;
+  const values = (data.series ?? []).filter(s =>
+    s.device === eeDeviceId && ACTIVE_POWER_PHASE_METRICS.includes(s.metric_type)
+  ).map(getLatestValue).filter((value): value is number => value !== undefined);
   return values.reduce((sum, value) => sum + value, 0) / 1000;
 }
+
 function calculateAveragePowerFactor(data: SeriesResponse, eeDeviceId: number): number {
-  if (!Array.isArray(data.series)) return 0;
-  const devicePowerFactors = new Map<number, Map<number, number>>();
-  data.series.forEach(series => {
-    if (series.device === eeDeviceId) return;
-    if (![POWER_FACTOR_L1, POWER_FACTOR_L2, POWER_FACTOR_L3].includes(series.metric_type)) return;
+  const devices = new Map<number, Map<number, number>>();
+  for (const series of data.series ?? []) {
+    if (series.device === eeDeviceId || ![POWER_FACTOR_L1, POWER_FACTOR_L2, POWER_FACTOR_L3].includes(series.metric_type)) continue;
     const value = getLatestValue(series);
-    if (value === undefined || value <= 0) return;
-    let deviceValues = devicePowerFactors.get(series.device);
-    if (!deviceValues) {
-      deviceValues = new Map<number, number>();
-      devicePowerFactors.set(series.device, deviceValues);
-    }
-    deviceValues.set(series.metric_type, value);
+    if (value === undefined || value <= 0) continue;
+    if (!devices.has(series.device)) devices.set(series.device, new Map());
+    devices.get(series.device)!.set(series.metric_type, value);
+  }
+  const averages: number[] = [];
+  devices.forEach(metrics => {
+    const l1 = metrics.get(POWER_FACTOR_L1), l2 = metrics.get(POWER_FACTOR_L2), l3 = metrics.get(POWER_FACTOR_L3);
+    if (l1 !== undefined && l2 !== undefined && l3 !== undefined) averages.push((l1 + l2 + l3) / 3);
   });
-  const deviceAverages: number[] = [];
-  devicePowerFactors.forEach(metrics => {
-    const l1 = metrics.get(POWER_FACTOR_L1);
-    const l2 = metrics.get(POWER_FACTOR_L2);
-    const l3 = metrics.get(POWER_FACTOR_L3);
-    if (l1 === undefined || l2 === undefined || l3 === undefined) return;
-    deviceAverages.push((l1 + l2 + l3) / 3);
-  });
-  if (!deviceAverages.length) return 0;
-  return deviceAverages.reduce((sum, value) => sum + value, 0) / deviceAverages.length;
+  return averages.length ? averages.reduce((sum, value) => sum + value, 0) / averages.length : 0;
 }
+
 function calculateMonthlyEnergy(data: SeriesResponse, eeDeviceId: number): number {
-  if (!Array.isArray(data.series)) return 0;
   let totalWattMinutes = 0;
-  data.series
-    .filter(series => series.device === eeDeviceId && [6, 7, 8].includes(series.metric_type))
-    .forEach(series => {
-      series.records.forEach(record => {
-        const value = record[4];
-        if (typeof value === 'number' && Number.isFinite(value)) totalWattMinutes += Math.max(0, value);
-      });
-    });
+  for (const series of data.series ?? []) {
+    if (series.device !== eeDeviceId || !ACTIVE_POWER_PHASE_METRICS.includes(series.metric_type)) continue;
+    for (const record of series.records ?? []) {
+      const value = Number(record[4]);
+      if (Number.isFinite(value)) totalWattMinutes += Math.max(0, value);
+    }
+  }
   return totalWattMinutes / 1000 / 60;
 }
+
 function buildDeviceMinutePower(data: SeriesResponse, eeDeviceId: number) {
-  const result = new Map<number, Map<number, number>>();
-  if (!Array.isArray(data.series)) return result;
-  data.series.forEach(series => {
-    if (series.device === eeDeviceId) return;
-    if (![6, 7, 8].includes(series.metric_type)) return;
-    let deviceMap = result.get(series.device);
-    if (!deviceMap) {
-      deviceMap = new Map<number, number>();
-      result.set(series.device, deviceMap);
+  const devices = new Map<number, Map<number, number>>();
+  for (const series of data.series ?? []) {
+    if (series.device === eeDeviceId || !ACTIVE_POWER_PHASE_METRICS.includes(series.metric_type)) continue;
+    if (!devices.has(series.device)) devices.set(series.device, new Map());
+    const minuteMap = devices.get(series.device)!;
+    for (const record of series.records ?? []) {
+      const time = new Date(record[3]).getTime(), watts = Number(record[4]);
+      if (!Number.isFinite(time) || !Number.isFinite(watts)) continue;
+      const minute = Math.floor(time / 60_000) * 60_000;
+      minuteMap.set(minute, (minuteMap.get(minute) ?? 0) + watts);
     }
-    series.records.forEach(record => {
-      const timestamp = new Date(record[3]);
-      timestamp.setSeconds(0, 0);
-      const minute = timestamp.getTime();
-      const value = record[4];
-      if (typeof value !== 'number' || !Number.isFinite(value)) return;
-      deviceMap!.set(minute, (deviceMap!.get(minute) || 0) + value);
-    });
-  });
-  return result;
+  }
+  return devices;
 }
+
 function calculatePeriodAnalytics(data: SeriesResponse, eeDeviceId: number, meters: Meter[]) {
-  const deviceMinutePower = buildDeviceMinutePower(data, eeDeviceId);
-  const portPowerByMinute = new Map<number, number>();
-  const deviceContributions = new Map<number, number>();
-  deviceMinutePower.forEach((minuteMap, deviceId) => {
+  const devices = buildDeviceMinutePower(data, eeDeviceId);
+  const portPower = new Map<number, number>(), contributions = new Map<number, number>();
+
+  devices.forEach((minuteMap, id) => {
     let contribution = 0;
     minuteMap.forEach((watts, minute) => {
-      const positivePower = Math.max(0, watts);
-      contribution += positivePower;
-      portPowerByMinute.set(minute, (portPowerByMinute.get(minute) || 0) + positivePower);
+      const positive = Math.max(0, watts);
+      contribution += positive;
+      portPower.set(minute, (portPower.get(minute) ?? 0) + positive);
     });
-    deviceContributions.set(deviceId, contribution);
+    contributions.set(id, contribution);
   });
-  let maxPowerWatts = 0;
-  portPowerByMinute.forEach(watts => {
-    if (watts > maxPowerWatts) maxPowerWatts = watts;
+
+  let maxPower = 0;
+  portPower.forEach(watts => { if (watts > maxPower) maxPower = watts; });
+
+  const total = [...contributions.values()].reduce((sum, value) => sum + value, 0);
+  let topId: number | null = null, topContribution = 0;
+  contributions.forEach((value, id) => {
+    if (value > topContribution) { topId = id; topContribution = value; }
   });
-  const totalContribution = Array.from(deviceContributions.values()).reduce((sum, value) => sum + value, 0);
-  let topDeviceId: number | null = null;
-  let topContribution = 0;
-  deviceContributions.forEach((value, deviceId) => {
-    if (value > topContribution) {
-      topContribution = value;
-      topDeviceId = deviceId;
-    }
-  });
-  const topMeter = topDeviceId !== null ? meters.find(meter => meter.id === topDeviceId) : undefined;
-  const topConsumerPercentage = totalContribution > 0
-    ? Math.round((topContribution / totalContribution) * 100)
-    : 0;
+
+  const meter = topId === null ? undefined : meters.find(item => item.id === topId);
   return {
-    maxPower: maxPowerWatts / 1000,
-    topConsumerName: topMeter
-      ? getMeterDisplayName(topMeter)
-      : topDeviceId !== null
-        ? `Device ${topDeviceId}`
-        : 'N/A',
-    topConsumerPercentage,
+    maxPower: maxPower / 1000,
+    topConsumerName: meter ? getMeterDisplayName(meter) : topId !== null ? `Device ${topId}` : 'N/A',
+    topConsumerPercentage: total > 0 ? Math.round(topContribution / total * 100) : 0
   };
 }
-function getDeviceColor(deviceName: string) {
-  const colors = [
-    { bg: 'rgba(59, 130, 246, 0.8)', border: 'rgb(59, 130, 246)' },
-    { bg: 'rgba(16, 185, 129, 0.8)', border: 'rgb(16, 185, 129)' },
-    { bg: 'rgba(245, 158, 11, 0.8)', border: 'rgb(245, 158, 11)' },
-    { bg: 'rgba(239, 68, 68, 0.8)', border: 'rgb(239, 68, 68)' },
-    { bg: 'rgba(139, 92, 246, 0.8)', border: 'rgb(139, 92, 246)' },
-    { bg: 'rgba(236, 72, 153, 0.8)', border: 'rgb(236, 72, 153)' },
-    { bg: 'rgba(6, 182, 212, 0.8)', border: 'rgb(6, 182, 212)' },
-    { bg: 'rgba(251, 146, 60, 0.8)', border: 'rgb(251, 146, 60)' },
-    { bg: 'rgba(132, 204, 22, 0.8)', border: 'rgb(132, 204, 22)' },
-    { bg: 'rgba(20, 184, 166, 0.8)', border: 'rgb(20, 184, 166)' },
-    { bg: 'rgba(234, 179, 8, 0.8)', border: 'rgb(234, 179, 8)' },
-    { bg: 'rgba(168, 85, 247, 0.8)', border: 'rgb(168, 85, 247)' },
-    { bg: 'rgba(244, 114, 182, 0.8)', border: 'rgb(244, 114, 182)' },
-    { bg: 'rgba(14, 165, 233, 0.8)', border: 'rgb(14, 165, 233)' },
-    { bg: 'rgba(34, 197, 94, 0.8)', border: 'rgb(34, 197, 94)' },
-    { bg: 'rgba(249, 115, 22, 0.8)', border: 'rgb(249, 115, 22)' },
-    { bg: 'rgba(163, 230, 53, 0.8)', border: 'rgb(163, 230, 53)' },
-    { bg: 'rgba(124, 58, 237, 0.8)', border: 'rgb(124, 58, 237)' },
-    { bg: 'rgba(219, 39, 119, 0.8)', border: 'rgb(219, 39, 119)' },
-  ];
-  let hash = 0;
-  for (let i = 0; i < deviceName.length; i++) {
-    hash = deviceName.charCodeAt(i) + ((hash << 5) - hash);
+
+function extractEnergySamples(data: SeriesResponse, deviceId: number, metricType: number): EnergySample[] {
+  const samples: EnergySample[] = [];
+  for (const series of data.series ?? []) {
+    if (Number(series.device) !== deviceId || Number(series.metric_type) !== metricType) continue;
+    for (const record of series.records ?? []) {
+      const time = new Date(record[3]).getTime(), watts = Number(record[4]);
+      if (Number.isFinite(time) && Number.isFinite(watts)) samples.push({ time, watts });
+    }
   }
-  return colors[Math.abs(hash) % colors.length];
+  samples.sort((a, b) => a.time - b.time);
+  const unique: EnergySample[] = [];
+  for (const sample of samples) {
+    if (unique.length && unique[unique.length - 1].time === sample.time) unique[unique.length - 1] = sample;
+    else unique.push(sample);
+  }
+  return unique;
 }
+
+function calculateDailyEnergy(samples: EnergySample[], sign: number): number {
+  let energy = 0;
+  for (let i = 1; i < samples.length; i++) {
+    const previous = samples[i - 1], current = samples[i];
+    const durationMs = current.time - previous.time;
+    if (durationMs <= 0 || durationMs > MAX_ENERGY_GAP_MS) continue;
+
+    const p1 = Math.max(0, previous.watts * sign);
+    const p2 = Math.max(0, current.watts * sign);
+
+    energy += ((p1 + p2) / 2) * durationMs / 3_600_000_000;
+  }
+  return energy;
+}
+
 export default function PortEnergyOverview() {
-  const t = useTranslation();
-  const router = useRouter();
+  const t = useTranslation(), router = useRouter();
   const [meters, setMeters] = useState<Meter[]>([]);
   const [periodData, setPeriodData] = useState<SeriesResponse | null>(null);
-  const [values, setValues] = useState<DashboardValues>({
-    totalDevices: 0,
-    currentTotalPower: 0,
-    averagePowerFactor: 0,
-  });
+  const [values, setValues] = useState<DashboardValues>({ totalDevices: 0, currentTotalPower: 0, averagePowerFactor: 0 });
   const [analytics, setAnalytics] = useState<AnalyticsValues>({
-    monthlyEnergy: 0,
-    maxPower: 0,
-    topConsumerName: 'N/A',
-    topConsumerPercentage: 0,
+    monthlyEnergy: 0, maxPower: 0, topConsumerName: 'N/A',
+    topConsumerPercentage: 0, solarGeneratedToday: 0, exportedToGridToday: 0
   });
   const [loading, setLoading] = useState<LoadingState>({
-    meters: true,
-    power: true,
-    powerFactor: true,
-    monthlyEnergy: true,
-    periodAnalytics: true,
+    meters: true, power: true, powerFactor: true, monthlyEnergy: true,
+    periodAnalytics: true, solarEnergy: true
   });
   const [errors, setErrors] = useState<ErrorState>({
-    meters: null,
-    power: null,
-    powerFactor: null,
-    monthlyEnergy: null,
-    periodAnalytics: null,
+    meters: null, power: null, powerFactor: null, monthlyEnergy: null,
+    periodAnalytics: null, solarEnergy: null
   });
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('15min');
-  const [selectedMeterIds, setSelectedMeterIds] = useState<number[]>([]);
-  const selectionInitialized = useRef(false);
-  const deviceSelectRef = useRef<HTMLDetailsElement>(null);
-  const [chartFontFamily, setChartFontFamily] = useState('');
+
   useEffect(() => {
-    const fontFamily = window.getComputedStyle(document.body).fontFamily;
-    if (fontFamily) {
-      ChartJS.defaults.font.family = fontFamily;
-      setChartFontFamily(fontFamily);
-    }
-  }, []);
-  useEffect(() => {
-    const loadMeters = async () => {
-      const token = authService.getToken();
-      const tokenType = authService.getTokenType();
-      if (!token) {
-        authService.logout();
-        router.replace('/login');
-        return;
-      }
+    async function loadMeters() {
+      const token = authService.getToken(), tokenType = authService.getTokenType();
+      if (!token) { authService.logout(); router.replace('/login'); return; }
       try {
         const response = await fetch(`${BACKEND_URL}/api/meters`, {
-          headers: {
-            Accept: 'application/json',
-            Authorization: `${tokenType} ${token}`,
-          },
-          cache: 'no-store',
+          headers: { Accept: 'application/json', Authorization: `${tokenType} ${token}` }, cache: 'no-store'
         });
-        if (response.status === 401) {
-          authService.logout();
-          router.replace('/login');
-          return;
-        }
+        if (response.status === 401) { authService.logout(); router.replace('/login'); return; }
         if (!response.ok) throw new Error(`Meters API ${response.status}`);
-        const data = (await response.json()) as Meter[];
+        const data = await response.json() as Meter[];
         setMeters(data);
         setValues(current => ({ ...current, totalDevices: data.length }));
-        setLoading(current => ({ ...current, meters: false }));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to load meters';
-        console.error('Meters error:', message);
-        setErrors(current => ({ ...current, meters: message }));
+        setErrors(current => ({ ...current, meters: null }));
+      } catch (err) {
+        setErrors(current => ({ ...current, meters: err instanceof Error ? err.message : 'Failed to load meters' }));
+      } finally {
         setLoading(current => ({ ...current, meters: false }));
       }
-    };
+    }
     void loadMeters();
   }, [router]);
+
   useEffect(() => {
     if (!meters.length) return;
-    const loadMainMetrics = async () => {
-      const token = authService.getToken();
-      const tokenType = authService.getTokenType();
-      if (!token) {
-        authService.logout();
-        router.replace('/login');
-        return;
-      }
+    const eeMeter = meters.find(meter => meter.tags?.includes(EE_TAG_ID));
+    if (!eeMeter) {
+      setLoading(current => ({ ...current, power: false, powerFactor: false, monthlyEnergy: false }));
+      return;
+    }
+    const controller = new AbortController();
+
+    async function loadMainMetrics() {
+      const token = authService.getToken(), tokenType = authService.getTokenType();
+      if (!token) { authService.logout(); router.replace('/login'); return; }
       const headers = {
-        Accept: 'application/json',
-        Authorization: `${tokenType} ${token}`,
-        'Content-Type': 'application/json',
+        Accept: 'application/json', Authorization: `${tokenType} ${token}`,
+        'Content-Type': 'application/json'
       };
-      const eeMeter = meters.find(meter => meter.tags?.includes(EE_TAG_ID));
-      if (!eeMeter) {
-        console.error('EE meter not found');
-        return;
-      }
-      const powerPayload = buildPowerPayload(eeMeter.id, eeMeter.idSite);
-      const powerFactorPayload = buildPowerFactorPayload(eeMeter.idSite);
-      const monthlyPayload = buildMonthlyEnergyPayload(eeMeter.id, eeMeter.idSite);
+      const requests = [
+        buildSeriesPayload(LIVE_DATA_MAX_AGE_MINUTES, { device: [eeMeter!.id] }),
+        buildSeriesPayload(LIVE_DATA_MAX_AGE_MINUTES, {
+          deviceType: ['meter'], metrics: [POWER_FACTOR_L1, POWER_FACTOR_L2, POWER_FACTOR_L3], units: [POWER_FACTOR_UNIT]
+        }),
+        buildSeriesPayload(30 * 24 * 60, { device: [eeMeter!.id] })
+      ];
+
       try {
-        const [powerResponse, powerFactorResponse, monthlyResponse] = await Promise.all([
-          fetch(`${BACKEND_URL}/api/series/data_lake`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(powerPayload),
-          }),
-          fetch(`${BACKEND_URL}/api/series/data_lake`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(powerFactorPayload),
-          }),
-          fetch(`${BACKEND_URL}/api/series/data_lake`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(monthlyPayload),
-          }),
-        ]);
-        if (
-          powerResponse.status === 401 ||
-          powerFactorResponse.status === 401 ||
-          monthlyResponse.status === 401
-        ) {
-          authService.logout();
-          router.replace('/login');
-          return;
+        const responses = await Promise.all(requests.map(payload => fetch(`${BACKEND_URL}/api/series/data_lake`, {
+          method: 'POST', headers, body: JSON.stringify(payload), signal: controller.signal
+        })));
+        if (controller.signal.aborted) return;
+        if (responses.some(response => response.status === 401)) {
+          authService.logout(); router.replace('/login'); return;
         }
+        const [powerResponse, pfResponse, energyResponse] = responses;
+
         if (powerResponse.ok) {
-          const data = (await powerResponse.json()) as SeriesResponse;
-          const power = calculateCurrentTotalPower(data, eeMeter.id);
+          const data = await powerResponse.json() as SeriesResponse;
           setValues(current => ({
-            ...current,
-            currentTotalPower: Math.round(power * 100) / 100,
+            ...current, currentTotalPower: Math.round(calculateCurrentTotalPower(data, eeMeter!.id) * 100) / 100
           }));
+        } else {
+          setErrors(current => ({ ...current, power: `Power API ${powerResponse.status}` }));
         }
-        setLoading(current => ({ ...current, power: false }));
-        if (powerFactorResponse.ok) {
-          const data = (await powerFactorResponse.json()) as SeriesResponse;
-          const pf = calculateAveragePowerFactor(data, eeMeter.id);
+
+        if (pfResponse.ok) {
+          const data = await pfResponse.json() as SeriesResponse;
           setValues(current => ({
-            ...current,
-            averagePowerFactor: Math.round(pf * 100) / 100,
+            ...current, averagePowerFactor: Math.round(calculateAveragePowerFactor(data, eeMeter!.id) * 100) / 100
           }));
+        } else {
+          setErrors(current => ({ ...current, powerFactor: `Power Factor API ${pfResponse.status}` }));
         }
-        setLoading(current => ({ ...current, powerFactor: false }));
-        if (monthlyResponse.ok) {
-          const data = (await monthlyResponse.json()) as SeriesResponse;
-          const monthlyEnergy = calculateMonthlyEnergy(data, eeMeter.id);
+
+        if (energyResponse.ok) {
+          const data = await energyResponse.json() as SeriesResponse;
           setAnalytics(current => ({
-            ...current,
-            monthlyEnergy: Math.round(monthlyEnergy),
+            ...current, monthlyEnergy: Math.round(calculateMonthlyEnergy(data, eeMeter!.id))
           }));
+        } else {
+          setErrors(current => ({ ...current, monthlyEnergy: `Monthly Energy API ${energyResponse.status}` }));
         }
-        setLoading(current => ({ ...current, monthlyEnergy: false }));
-        setLastUpdated(new Date());
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to load metrics';
-        console.error('Metrics error:', message);
+        if (!controller.signal.aborted) setLastUpdated(new Date());
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          const message = err instanceof Error ? err.message : 'Failed to load main metrics';
+          setErrors(current => ({ ...current, power: message, powerFactor: message, monthlyEnergy: message }));
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(current => ({
+          ...current, power: false, powerFactor: false, monthlyEnergy: false
+        }));
       }
-    };
+    }
     void loadMainMetrics();
+    return () => controller.abort();
   }, [meters, router]);
+
   useEffect(() => {
     if (!meters.length) return;
-    const loadPeriodAnalytics = async () => {
-      const token = authService.getToken();
-      const tokenType = authService.getTokenType();
-      if (!token) {
-        authService.logout();
-        router.replace('/login');
-        return;
-      }
-      const eeMeter = meters.find(meter => meter.tags?.includes(EE_TAG_ID));
-      if (!eeMeter) return;
+    const eeMeter = meters.find(meter => meter.tags?.includes(EE_TAG_ID));
+    if (!eeMeter) {
+      setLoading(current => ({ ...current, periodAnalytics: false }));
+      return;
+    }
+    const controller = new AbortController();
+
+    async function loadPeriodAnalytics() {
+      const token = authService.getToken(), tokenType = authService.getTokenType();
+      if (!token) { authService.logout(); router.replace('/login'); return; }
       setLoading(current => ({ ...current, periodAnalytics: true }));
       setErrors(current => ({ ...current, periodAnalytics: null }));
+
       try {
-        const payload = buildPeriodAnalyticsPayload(eeMeter.idSite, timePeriod);
+        const payload = buildSeriesPayload(getTimePeriodMinutes(timePeriod) + 5, { deviceType: ['meter'] });
         const response = await fetch(`${BACKEND_URL}/api/series/data_lake`, {
           method: 'POST',
           headers: {
-            Accept: 'application/json',
-            Authorization: `${tokenType} ${token}`,
-            'Content-Type': 'application/json',
+            Accept: 'application/json', Authorization: `${tokenType} ${token}`,
+            'Content-Type': 'application/json'
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(payload), signal: controller.signal
         });
-        if (response.status === 401) {
-          authService.logout();
-          router.replace('/login');
-          return;
-        }
+        if (controller.signal.aborted) return;
+        if (response.status === 401) { authService.logout(); router.replace('/login'); return; }
         if (!response.ok) throw new Error(`Analytics API ${response.status}`);
-        const data = (await response.json()) as SeriesResponse;
+        const data = await response.json() as SeriesResponse;
+        if (controller.signal.aborted) return;
+
         setPeriodData(data);
-        const result = calculatePeriodAnalytics(data, eeMeter.id, meters);
+        const result = calculatePeriodAnalytics(data, eeMeter!.id, meters);
         setAnalytics(current => ({
-          ...current,
-          maxPower: Math.round(result.maxPower * 100) / 100,
+          ...current, maxPower: Math.round(result.maxPower * 100) / 100,
           topConsumerName: result.topConsumerName,
-          topConsumerPercentage: result.topConsumerPercentage,
+          topConsumerPercentage: result.topConsumerPercentage
         }));
         setLastUpdated(new Date());
-      } catch (error) {
-        const message = error instanceof Error
-          ? error.message
-          : 'Failed to load period analytics';
-        console.error('Period analytics error:', message);
-        setErrors(current => ({ ...current, periodAnalytics: message }));
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setErrors(current => ({
+          ...current, periodAnalytics: err instanceof Error ? err.message : 'Failed to load period analytics'
+        }));
         setPeriodData(null);
       } finally {
-        setLoading(current => ({ ...current, periodAnalytics: false }));
+        if (!controller.signal.aborted) setLoading(current => ({ ...current, periodAnalytics: false }));
       }
-    };
+    }
     void loadPeriodAnalytics();
+    return () => controller.abort();
   }, [meters, timePeriod, router]);
-  const chartMeterOptions = useMemo(() => {
-    if (!periodData?.series?.length) return [];
-    const eeMeter = meters.find(meter => meter.tags?.includes(EE_TAG_ID));
-    const meterIdsWithData = new Set(
-      periodData.series
-        .filter(series =>
-          series.device !== eeMeter?.id &&
-          [6, 7, 8].includes(series.metric_type)
-        )
-        .map(series => series.device)
-    );
-    return meters
-      .filter(meter => meterIdsWithData.has(meter.id))
-      .sort((a, b) => a.id - b.id);
-  }, [periodData, meters]);
+
   useEffect(() => {
-    if (!chartMeterOptions.length) return;
-    const availableIds = chartMeterOptions.map(meter => meter.id);
-    if (!selectionInitialized.current) {
-      selectionInitialized.current = true;
-      setSelectedMeterIds(availableIds);
-      return;
-    }
-    setSelectedMeterIds(current => current.filter(id => availableIds.includes(id)));
-  }, [chartMeterOptions]);
-  useEffect(() => {
-    const handleClickOutside = (event: PointerEvent) => {
-      if (deviceSelectRef.current && !deviceSelectRef.current.contains(event.target as Node)) {
-        deviceSelectRef.current.open = false;
-      }
-    };
-    document.addEventListener('pointerdown', handleClickOutside);
-    return () => document.removeEventListener('pointerdown', handleClickOutside);
-  }, []);
-  const toggleChartMeter = (meterId: number) => {
-    setSelectedMeterIds(current =>
-      current.includes(meterId)
-        ? current.filter(id => id !== meterId)
-        : [...current, meterId]
-    );
-  };
-  const selectedMeterLabel = useMemo(() => {
-    if (!selectedMeterIds.length) return t.selectDevices;
-    if (selectedMeterIds.length === 1) {
-      const meter = meters.find(item => item.id === selectedMeterIds[0]);
-      return getMeterDisplayName(meter, selectedMeterIds[0]);
-    }
-    return `${selectedMeterIds.length} ${t.devicesSelected}`;
-  }, [selectedMeterIds, meters, t.selectDevices, t.devicesSelected]);
-  const stackedChartData = useMemo(() => {
-    if (!periodData?.series?.length || !selectedMeterIds.length) return { labels: [] as Date[], datasets: [] };
-    const eeMeter = meters.find(meter => meter.tags?.includes(EE_TAG_ID));
-    if (!eeMeter) return { labels: [] as Date[], datasets: [] };
-    const selectedIds = new Set(selectedMeterIds);
-    type Sample = { time: number; watts: number };
-    const devices = new Map<number, Map<number, Sample[]>>();
-    let latestTime = -Infinity;
-    for (const series of periodData.series) {
-      const deviceId = Number(series.device);
-      const phase = Number(series.metric_type);
-      if (deviceId === eeMeter.id || !selectedIds.has(deviceId) || ![6, 7, 8].includes(phase)) continue;
-      if (!devices.has(deviceId)) devices.set(deviceId, new Map());
-      const phases = devices.get(deviceId)!;
-      if (!phases.has(phase)) phases.set(phase, []);
-      for (const record of series.records ?? []) {
-        const time = new Date(record[3]).getTime();
-        const watts = Number(record[4]);
-        if (!Number.isFinite(time) || !Number.isFinite(watts)) continue;
-        phases.get(phase)!.push({ time, watts });
-        latestTime = Math.max(latestTime, time);
-      }
-    }
-    if (!Number.isFinite(latestTime)) return { labels: [] as Date[], datasets: [] };
-    const periodMs = getTimePeriodMinutes(timePeriod) * 60_000;
-    const end = Math.floor(latestTime / CHART_STEP_MS) * CHART_STEP_MS;
-    const start = end - periodMs;
-    const timestamps: number[] = [];
-    for (let time = start; time <= end; time += CHART_STEP_MS) timestamps.push(time);
-    const labels = timestamps.map(time => new Date(time));
-    const datasets = [...devices.entries()].sort(([a], [b]) => a - b).map(([deviceId, phaseSamples]) => {
-      const meter = meters.find(item => item.id === deviceId);
-      const name = getMeterDisplayName(meter, deviceId);
-      const color = getDeviceColor(name);
-      const phaseData = [...phaseSamples.values()].map(readings => {
-        readings.sort((a, b) => a.time - b.time);
-        let index = 0;
-        return timestamps.map(timestamp => {
-          while (index < readings.length && readings[index].time < timestamp) index++;
-          const next = readings[index];
-          if (next?.time === timestamp) return next.watts;
-          const previous = readings[index - 1];
-          if (!previous) return null;
-          // interpolation between points (MAXIMUM 5 MINUTES GAP)
-          if (next) {
-            const gap = next.time - previous.time;
-            if (gap > MAX_INTERPOLATION_GAP_MS || gap <= 0) return null;
-            const ratio = (timestamp - previous.time) / gap;
-            return previous.watts + (next.watts - previous.watts) * ratio;
-          }
-          return timestamp - previous.time <= MAX_INTERPOLATION_GAP_MS ? previous.watts : null;
+    const controller = new AbortController();
+
+    async function loadDailySolarEnergy() {
+      const token = authService.getToken(), tokenType = authService.getTokenType();
+      if (!token) { authService.logout(); router.replace('/login'); return; }
+      setLoading(current => ({ ...current, solarEnergy: true }));
+      setErrors(current => ({ ...current, solarEnergy: null }));
+
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/series/data_lake`, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json', Authorization: `${tokenType} ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(buildTodayPayload()), signal: controller.signal, cache: 'no-store'
         });
-      });
-      const data = timestamps.map((_, index) => {
-        const watts = phaseData.map(phase => phase[index]);
-        if (!watts.length || watts.some(value => value === null)) return null;
-        return Math.max(0, watts.reduce<number>((sum, value) => sum + (value ?? 0), 0) / 1000);
-      });
-      return {
-        label: name, data,
-        backgroundColor: color.bg,
-        borderColor: color.border,
-        borderWidth: 1.5,
-        fill: true,
-        tension: 0,
-        pointRadius: 0,
-        pointHoverRadius: 5,
-        pointHoverBackgroundColor: color.border,
-        pointHoverBorderColor: '#fff',
-        pointHoverBorderWidth: 2,
-        spanGaps: false,
-      };
-    });
-    return { labels, datasets };
-  }, [periodData, meters, selectedMeterIds, timePeriod]);
-  const chartOptions = useMemo<ChartOptions<'line'>>(() => ({
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        display: true,
-        position: 'bottom',
-        labels: {
-          boxWidth: 10,
-          padding: 6,
-          usePointStyle: true,
-          pointStyle: 'circle',
-          font: { size: 9 },
-        },
-      },
-      tooltip: {
-        enabled: true,
-        mode: 'nearest',
-        intersect: false,
-        position: 'nearest',
-        backgroundColor: 'rgba(17, 24, 39, 0.97)',
-        titleColor: '#fff',
-        bodyColor: '#e5e7eb',
-        borderColor: 'rgba(59, 130, 246, 0.5)',
-        borderWidth: 1,
-        padding: 12,
-        displayColors: true,
-        boxWidth: 10,
-        boxHeight: 10,
-        usePointStyle: true,
-        bodySpacing: 5,
-        titleFont: { size: 13, weight: 'bold' },
-        bodyFont: { size: 11 },
-        footerFont: { size: 12, weight: 'bold' },
-        callbacks: {
-          title: items => {
-            if (!items.length) return '';
-            return new Date(items[0].parsed.x).toLocaleTimeString('en-GB', {
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: false,
-            });
-          },
-          beforeBody: items => {
-            const activeDevices = items.filter(item => item.parsed.y >= 0.1).length;
-            if (activeDevices <= 10) return [];
-            return [`📊 ${activeDevices} active devices - Top 10 shown`];
-          },
-          label: context => {
-            if (!context.parsed.y || context.parsed.y < 0.1) return '';
-            const allItems = context.chart.tooltip?.dataPoints || [];
-            const sortedItems = [...allItems]
-              .filter(item => item.parsed.y >= 0.1)
-              .sort((a, b) => b.parsed.y - a.parsed.y);
-            const index = sortedItems.findIndex(
-              item => item.datasetIndex === context.datasetIndex
-            );
-            if (index >= 10) return '';
-            return `${context.dataset.label}: ${context.parsed.y.toFixed(2)} ${t.kW}`;
-          },
-          afterBody: items => {
-            const sortedItems = [...items]
-              .filter(item => item.parsed.y >= 0.1)
-              .sort((a, b) => b.parsed.y - a.parsed.y);
-            if (sortedItems.length <= 10) return [];
-            const others = sortedItems.slice(10);
-            const othersPower = others.reduce(
-              (sum, item) => sum + item.parsed.y,
-              0
-            );
-            return [`+ ${others.length} other devices: ${othersPower.toFixed(2)} ${t.kW}`];
-          },
-          footer: items => {
-            const total = items.reduce((sum, item) => sum + item.parsed.y, 0);
-            return `━━━━━━━━━━━━━\nTotal: ${total.toFixed(2)} ${t.kW}`;
-          },
-        },
-      },
-      filler: { propagate: true },
-    },
-    scales: {
-      x: {
-        type: 'time',
-        stacked: false,
-        time: {
-          displayFormats: {
-            minute: 'HH:mm',
-            hour: 'HH:mm',
-          },
-          unit: timePeriod === '6hours' ? 'hour' : 'minute',
-          tooltipFormat: 'HH:mm',
-          minUnit: 'minute',
-        },
-        grid: { display: false },
-        ticks: {
-          maxRotation: 0,
-          autoSkip: true,
-          maxTicksLimit: 8,
-          color: '#6b7280',
-          font: { size: 11 },
-        },
-        border: { display: false },
-      },
-      y: {
-        stacked: true,
-        beginAtZero: true,
-        suggestedMin: 0,
-        grid: {
-          color: 'rgba(0, 0, 0, 0.08)',
-        },
-        ticks: {
-          callback: value =>
-            Number(value) < 0
-              ? ''
-              : `${value} kW`,
-          color: '#6b7280',
-          padding: 8,
-          font: { size: 11 },
-        },
-        border: { display: false },
-      },
-    },
-    interaction: {
-      mode: 'index',
-      intersect: false,
-    },
-    elements: {
-      line: { tension: 0 },
-    },
-  }), [timePeriod, t.kW, chartFontFamily]);
-  const getTimePeriodLabel = (period: TimePeriod) => {
-    switch (period) {
-      case '15min': return t.last15Minutes;
-      case '30min': return t.last30Minutes;
-      case '1hour': return t.lastHour;
-      case '3hours': return t.last3Hours;
-      case '6hours': return t.last6Hours;
+        if (controller.signal.aborted) return;
+        if (response.status === 401) { authService.logout(); router.replace('/login'); return; }
+        if (!response.ok) throw new Error(`Daily Solar Energy API ${response.status}`);
+        const data = await response.json() as SeriesResponse;
+        if (controller.signal.aborted) return;
+
+        const solarSamples = extractEnergySamples(data, PV_DEVICE_ID, PV_POWER_MEAN);
+        const gridSamples = extractEnergySamples(data, INTERLINK_DEVICE_ID, GRID_ACTIVE_POWER);
+
+        setAnalytics(current => ({
+          ...current,
+          solarGeneratedToday: calculateDailyEnergy(solarSamples, PV_SIGN),
+          exportedToGridToday: calculateDailyEnergy(gridSamples, EXPORT_SIGN)
+        }));
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setErrors(current => ({
+            ...current, solarEnergy: err instanceof Error ? err.message : 'Failed to calculate daily energy'
+          }));
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(current => ({ ...current, solarEnergy: false }));
+      }
     }
-  };
-  const periodOptions: { value: TimePeriod; label: string }[] = [
-    { value: '15min', label: t.last15Minutes },
-    { value: '30min', label: t.last30Minutes },
-    { value: '1hour', label: t.lastHour },
-    { value: '3hours', label: t.last3Hours },
-    { value: '6hours', label: t.last6Hours },
-  ];
+    void loadDailySolarEnergy();
+    return () => controller.abort();
+  }, [router]);
+
   const apiConnected = !loading.meters && !errors.meters;
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-      {/* Header */}
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-200">
-          {t.portEnergyOverview}
-        </h2>
+        <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-200">{t.portEnergyOverview}</h2>
         {apiConnected ? (
           <div className="flex items-center text-green-600 dark:text-green-400">
-            <Wifi className="h-4 w-4 mr-1" />
-            <span className="text-sm">{t.active}</span>
+            <Wifi className="h-4 w-4 mr-1" /><span className="text-sm">{t.active}</span>
           </div>
         ) : errors.meters ? (
           <div className="flex items-center text-red-600 dark:text-red-400">
-            <WifiOff className="h-4 w-4 mr-1" />
-            <span className="text-sm">{t.disconnected}</span>
+            <WifiOff className="h-4 w-4 mr-1" /><span className="text-sm">{t.disconnected}</span>
           </div>
         ) : (
           <div className="flex items-center text-gray-500 dark:text-gray-400">
@@ -830,183 +486,36 @@ export default function PortEnergyOverview() {
           </div>
         )}
       </div>
-      {/* Current Metrics */}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <MetricCard
-          title={t.totalDevicesLabel}
-          value={values.totalDevices}
-          icon={Database}
-          variant="blue"
-          loading={loading.meters}
-          error={!!errors.meters}
-        />
-        <MetricCard
-          title={t.currentTotalPowerLabel}
-          value={values.currentTotalPower}
-          unit={t.kW}
-          icon={Zap}
-          variant="yellow"
-          loading={loading.power}
-          error={!!errors.power}
-        />
-        <MetricCard
-          title={t.averagePowerFactorLabel}
-          value={values.averagePowerFactor}
-          icon={Activity}
-          variant="purple"
-          loading={loading.powerFactor}
-          error={!!errors.powerFactor}
-        />
+        <MetricCard title={t.totalDevicesLabel} value={values.totalDevices} icon={Database}
+          variant="blue" loading={loading.meters} error={!!errors.meters} />
+        <MetricCard title={t.currentTotalPowerLabel} value={values.currentTotalPower} unit={t.kW} icon={Zap}
+          variant="yellow" loading={loading.power} error={!!errors.power} />
+        <MetricCard title={t.averagePowerFactorLabel} value={values.averagePowerFactor} icon={Activity}
+          variant="purple" loading={loading.powerFactor} error={!!errors.powerFactor} />
       </div>
-      {/* Time Period */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-3 border border-gray-200 dark:border-gray-700 mb-6">
-        <label className="flex items-center text-base font-semibold text-gray-700 dark:text-gray-300 mb-3">
-          <Clock className="w-5 h-5 mr-2 text-blue-600 dark:text-blue-400" />
-          {t.timePeriod}
-        </label>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          {periodOptions.map(option => (
-            <button
-              key={option.value}
-              onClick={() => setTimePeriod(option.value)}
-              disabled={loading.periodAnalytics}
-              className={`px-3 py-2 rounded-lg font-medium transition-all duration-200 border-2 ${
-                timePeriod === option.value
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-md'
-                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:border-blue-600 hover:shadow-sm'
-              } ${loading.periodAnalytics ? 'opacity-60 cursor-not-allowed' : ''}`}
-            >
-              <div className="text-sm">{option.label}</div>
-            </button>
-          ))}
-        </div>
+
+      <TimeSelector value={timePeriod} onChange={setTimePeriod} disabled={loading.periodAnalytics} />
+
+      <PowerChart meters={meters} periodData={periodData} timePeriod={timePeriod} loading={loading.periodAnalytics} />
+      <PVChart timePeriod={timePeriod} />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+        <MetricCard title={t.monthlyEnergyLabel} value={analytics.monthlyEnergy.toLocaleString()} unit={t.kWh}
+          icon={Zap} variant="indigo" loading={loading.monthlyEnergy} error={!!errors.monthlyEnergy} />
+        <MetricCard title={t.maxPowerLabel} value={analytics.maxPower} unit={t.kW}
+          icon={TrendingUp} variant="rose" loading={loading.periodAnalytics} error={!!errors.periodAnalytics} />
+        <MetricCard title={t.topConsumerLabel} value={analytics.topConsumerName} unit={`- ${analytics.topConsumerPercentage}%`}
+          icon={PieChart} variant="amber" loading={loading.periodAnalytics} error={!!errors.periodAnalytics} />
+        <MetricCard title="Solar Generated Today" value={analytics.solarGeneratedToday.toFixed(2)} unit="kWh"
+          icon={Sun} variant="yellow" loading={loading.solarEnergy} error={!!errors.solarEnergy} />
+        <MetricCard title="Exported to Grid Today" value={analytics.exportedToGridToday.toFixed(2)} unit="kWh"
+          icon={CircleArrowUpRightExit} variant="green" loading={loading.solarEnergy} error={!!errors.solarEnergy} />
       </div>
-      {/* Device Power Distribution */}
-      <div className="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 rounded-xl p-6 border border-gray-200 dark:border-gray-700 shadow-lg">
-        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <h3 className="flex items-center text-xl font-semibold text-gray-800 dark:text-gray-200">
-            <Activity className="mr-2 h-5 w-5 text-blue-600 dark:text-blue-400" />
-            {t.devicePowerDistribution} - {getTimePeriodLabel(timePeriod)}
-          </h3>
-          <details ref={deviceSelectRef} className="relative">
-            <summary className="flex min-w-[280px] cursor-pointer list-none items-center justify-between gap-3 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm hover:border-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 [&::-webkit-details-marker]:hidden">
-              <span className="max-w-[230px] truncate">{selectedMeterLabel}</span>
-              <svg
-                className="h-4 w-4 shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 9l-7 7-7-7"
-                />
-              </svg>
-            </summary>
-            <div className="absolute right-0 z-50 mt-2 w-[340px] rounded-lg border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-600 dark:bg-gray-800">
-              <div className="mb-2 flex items-center justify-between border-b border-gray-200 pb-2 dark:border-gray-700">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSelectedMeterIds(
-                      chartMeterOptions.map(meter => meter.id)
-                    )
-                  }
-                  className="text-sm font-medium text-blue-600 hover:text-blue-700"
-                >
-                  {t.selectAll}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedMeterIds([])}
-                  className="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                >
-                  {t.clear}
-                </button>
-              </div>
-              <div className="max-h-64 space-y-1 overflow-y-auto">
-                {chartMeterOptions.map(meter => {
-                  const checked = selectedMeterIds.includes(meter.id);
-                  return (
-                    <label
-                      key={meter.id}
-                      className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleChartMeter(meter.id)}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">
-                        {getMeterDisplayName(meter)}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          </details>
-        </div>
-        <div className="h-96">
-          {loading.periodAnalytics ? (
-            <div className="h-full flex items-center justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
-              <span className="ml-2 text-gray-500 dark:text-gray-400">
-                {t.loadingData}
-              </span>
-            </div>
-          ) : !selectedMeterIds.length ? (
-            <div className="h-full flex items-center justify-center text-gray-500 dark:text-gray-400">
-              {t.noDevicesSelected}
-            </div>
-          ) : stackedChartData.datasets.length > 0 ? (
-            <Line data={stackedChartData} options={chartOptions} />
-          ) : (
-            <div className="h-full flex items-center justify-center text-gray-500 dark:text-gray-400">
-              {t.noDataAvailable}
-            </div>
-          )}
-        </div>
-      </div>
-      {/* Analytics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
-        <MetricCard
-          title={t.monthlyEnergyLabel}
-          value={analytics.monthlyEnergy.toLocaleString()}
-          unit={`${t.kWh}`}
-          icon={Zap}
-          variant="indigo"
-          loading={loading.monthlyEnergy}
-          error={!!errors.monthlyEnergy}
-        />
-        <MetricCard
-          title={t.maxPowerLabel}
-          value={analytics.maxPower}
-          unit={`${t.kW}`}
-          icon={TrendingUp}
-          variant="rose"
-          loading={loading.periodAnalytics}
-          error={!!errors.periodAnalytics}
-        />
-        <MetricCard
-          title={t.topConsumerLabel}
-          value={analytics.topConsumerName}
-          unit={`- ${analytics.topConsumerPercentage}%`}
-          icon={PieChart}
-          variant="amber"
-          loading={loading.periodAnalytics}
-          error={!!errors.periodAnalytics}
-        />
-      </div>
-      {/* Last Update */}
+
       <div className="mt-4 text-sm text-gray-600 dark:text-gray-400">
-        <p>
-          {t.lastUpdated}:{' '}
-          {lastUpdated ? lastUpdated.toLocaleTimeString() : t.na}
-        </p>
+        <p>{t.lastUpdated}: {lastUpdated ? lastUpdated.toLocaleTimeString() : t.na}</p>
       </div>
     </div>
   );
