@@ -228,106 +228,295 @@ export default function PowerFlowDiagram() {
   const gridExport = data.interlink !== null && data.interlink > 0;
   const solarActive = data.solar !== null && data.solar > 0;
   const px = (f: number) => f * W;
-  return (
-    <section className="overflow-hidden rounded-xl border border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 shadow-lg dark:border-gray-700 dark:from-gray-800 dark:to-gray-900">
-      <div className="px-6 pt-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="flex items-center text-2xl font-semibold text-gray-800 dark:text-gray-200">
-              <MonitorActivity className="mr-2 h-8 w-8 text-blue-600 dark:text-blue-400" />
-              {t.powerFlowTitle}
-            </h3>
-            <p className="mt-2 max-w-xl text-base leading-relaxed text-gray-500 dark:text-gray-400">
-              {t.powerFlowDescription}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? t.powerFlowLoading : updatedAt ? `${t.powerFlowUpdated} ${updatedAt.toLocaleTimeString('en-GB')}` : t.powerFlowAwaitingData}
-          </div>
+  
+return (
+  <section className="overflow-hidden rounded-xl border border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 shadow-lg dark:border-gray-700 dark:from-gray-800 dark:to-gray-900">
+    <div className="px-6 pt-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="flex items-center text-2xl font-semibold text-gray-800 dark:text-gray-200">
+            <MonitorActivity className="mr-2 h-8 w-8 text-blue-600 dark:text-blue-400" />
+            {t.powerFlowTitle}
+          </h3>
+          <p className="mt-2 max-w-xl text-base leading-relaxed text-gray-500 dark:text-gray-400">
+            {t.powerFlowDescription}
+          </p>
         </div>
-        {error && <p className="mt-3 text-xs text-red-500">{t.powerFlowUnavailable}</p>}
+
+        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          {loading
+            ? t.powerFlowLoading
+            : updatedAt
+              ? `${t.powerFlowUpdated} ${updatedAt.toLocaleTimeString('en-GB')}`
+              : t.powerFlowAwaitingData}
+        </div>
       </div>
-      <div ref={boxRef} className="relative hidden h-[470px] min-w-0 md:block">
+
+      {error && (
+        <p className="mt-3 text-xs text-red-500">
+          {t.powerFlowUnavailable}
+        </p>
+      )}
+    </div>
+
+    <div className="hidden pb-16 md:block">
+      <div ref={boxRef} className="relative h-[500px] min-w-0">
         <style>{FLOW_CSS}</style>
+
         {W > 0 && (
-          <svg className="pointer-events-none absolute inset-0 text-gray-400 dark:text-gray-500"
-            width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-            <line x1={px(X.j1)} x2={px(X.j2)} y1={Y} y2={Y}
-              stroke="currentColor" strokeOpacity={0.7} strokeWidth={3} />
-            <line x1={px(X.j1)} x2={px(X.start)} y1={Y} y2={Y}
-              stroke={gridActive ? BLUE : 'currentColor'} strokeWidth={1.5}
+          <svg
+            className="pointer-events-none absolute inset-0 text-gray-400 dark:text-gray-500"
+            width={W}
+            height={H}
+            viewBox={`0 0 ${W} ${H}`}
+          >
+            <line
+              x1={px(X.j1)}
+              x2={px(X.j2)}
+              y1={Y}
+              y2={Y}
+              stroke="currentColor"
+              strokeOpacity={0.7}
+              strokeWidth={3}
+            />
+
+            <line
+              x1={px(X.j1)}
+              x2={px(X.start)}
+              y1={Y}
+              y2={Y}
+              stroke={gridActive ? BLUE : 'currentColor'}
+              strokeWidth={1.5}
               strokeOpacity={gridActive ? 1 : 0.7}
               strokeDasharray={gridActive ? '6 5' : '5 5'}
-              className={gridActive ? `flow-dash ${gridExport ? '' : 'rev'}` : ''} />
-            {gridActive && <Arrow x={(px(X.j1) + px(X.start)) / 2} y={Y} angle={gridExport ? 0 : 180} color={BLUE} />}
-            <line x1={px(X.j1)} x2={px(X.j1)} y1={191} y2={Y}
-              stroke={solarActive ? YELLOW : 'currentColor'} strokeWidth={1.5}
+              className={gridActive ? `flow-dash ${gridExport ? '' : 'rev'}` : ''}
+            />
+
+            {gridActive && (
+              <Arrow
+                x={(px(X.j1) + px(X.start)) / 2}
+                y={Y}
+                angle={gridExport ? 0 : 180}
+                color={BLUE}
+              />
+            )}
+
+            <line
+              x1={px(X.j1)}
+              x2={px(X.j1)}
+              y1={191}
+              y2={Y}
+              stroke={solarActive ? YELLOW : 'currentColor'}
+              strokeWidth={1.5}
               strokeOpacity={solarActive ? 1 : 0.7}
               strokeDasharray={solarActive ? '6 5' : '5 5'}
-              className={solarActive ? 'flow-dash' : ''} />
-            {solarActive && <Arrow x={px(X.j1)} y={216} angle={-90} color={YELLOW} />}
-            <g stroke="currentColor" strokeWidth={1.5} strokeDasharray="5 5" strokeOpacity={0.7}>
-              <line x1={px(X.j1)} x2={px(X.j1)} y1={Y} y2={294} />
-              <line x1={px(X.j2)} x2={px(X.j2)} y1={193} y2={Y} />
-              <line x1={px(X.j2)} x2={px(X.j2)} y1={Y} y2={284} />
+              className={solarActive ? 'flow-dash' : ''}
+            />
+
+            {solarActive && (
+              <Arrow
+                x={px(X.j1)}
+                y={216}
+                angle={-90}
+                color={YELLOW}
+              />
+            )}
+
+            <g
+              stroke="currentColor"
+              strokeWidth={1.5}
+              strokeDasharray="5 5"
+              strokeOpacity={0.7}
+            >
+              <line
+                x1={px(X.j1)}
+                x2={px(X.j1)}
+                y1={Y}
+                y2={294}
+              />
+              <line
+                x1={px(X.j2)}
+                x2={px(X.j2)}
+                y1={193}
+                y2={Y}
+              />
+              <line
+                x1={px(X.j2)}
+                x2={px(X.j2)}
+                y1={Y}
+                y2={284}
+              />
             </g>
-            <circle cx={px(X.j1)} cy={Y} r={3.5} fill="currentColor" />
-            <circle cx={px(X.j2)} cy={Y} r={3.5} fill="currentColor" />
+
+            <circle
+              cx={px(X.j1)}
+              cy={Y}
+              r={3.5}
+              fill="currentColor"
+            />
+            <circle
+              cx={px(X.j2)}
+              cy={Y}
+              r={3.5}
+              fill="currentColor"
+            />
           </svg>
         )}
+
         {W > 0 && (
           <>
+            {/* Grid Interconnection */}
             <At x={px(X.grid)} top={Y} centerY>
-              <FlowItem icon={Cable} title={t.powerFlowGridInterconnection} power={data.interlink}
-                status={gridStatus} description={t.powerFlowACInterlink} color="blue" />
+              <FlowItem
+                icon={Cable}
+                title={t.powerFlowGridInterconnection}
+                power={data.interlink}
+                status={gridStatus}
+                description={t.powerFlowACInterlink}
+                color="blue"
+              />
             </At>
+
+            {/* Solar Generation */}
             <At x={px(X.j1)} top={28}>
-              <FlowItem icon={Sun} title={t.powerFlowSolarGeneration} power={data.solar}
-                status={solarStatus} description={solarDescription} color="yellow" />
+              <FlowItem
+                icon={Sun}
+                title={t.powerFlowSolarGeneration}
+                power={data.solar}
+                status={solarStatus}
+                description={solarDescription}
+                color="yellow"
+              />
             </At>
+
+            {/* Electric Vehicle Charging */}
             <At x={px(X.j2)} top={28}>
-              <FlowItem icon={CarFront} title={t.powerFlowEVCharging} power={null}
-                status={t.powerFlowLiveUnavailable} description={t.powerFlowCompletedSessions} />
+              <FlowItem
+                icon={CarFront}
+                title={t.powerFlowEVCharging}
+                power={null}
+                status={t.powerFlowLiveUnavailable}
+                description={t.powerFlowCompletedSessions}
+              />
             </At>
+
+            {/* Battery Storage */}
             <At x={px(X.j1)} top={290}>
-              <FlowItem icon={BatteryCharging} title={t.powerFlowBatteryStorage} power={null}
-                status={t.powerFlowDataUnavailable} description={t.powerFlowStorageSystem} color="green" />
+              <FlowItem
+                icon={BatteryCharging}
+                title={t.powerFlowBatteryStorage}
+                power={null}
+                status={t.powerFlowDataUnavailable}
+                description={t.powerFlowStorageSystem}
+                color="green"
+              />
             </At>
+
+            {/* Forklift */}
             <At x={px(X.j2)} top={290}>
-              <FlowItem icon={Truck} title={t.powerFlowForklift} power={null}
-                status={t.powerFlowDataUnavailable} description={`— kWh ${t.powerFlowThisSession}`} />
+              <FlowItem
+                icon={Truck}
+                title={t.powerFlowForklift}
+                power={null}
+                status={t.powerFlowDataUnavailable}
+                description={`— kWh ${t.powerFlowThisSession}`}
+              />
             </At>
-            <div className="absolute flex h-[126px] w-[126px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border border-gray-300 bg-gray-50 text-center dark:border-gray-600 dark:bg-gray-800"
-              style={{ left: px(X.bus), top: Y }}>
+
+            {/* DC Bus Voltage */}
+            <div
+              className="absolute flex h-[130px] w-[130px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border border-gray-300 bg-gray-50 text-center dark:border-gray-600 dark:bg-gray-800"
+              style={{ left: px(X.bus), top: Y }}
+            >
               <Zap className="mb-1 h-6 w-6 text-blue-600 dark:text-blue-400" />
-              <span className="text-base text-gray-500 dark:text-gray-400">{t.powerFlowDCBus}</span>
-              <span className="mt-1 text-xl font-semibold tabular-nums text-gray-900 dark:text-white">
-                {data.dcBusVoltage === null ? '—' : data.dcBusVoltage.toFixed(1)} <span className="text-base text-gray-500 dark:text-gray-400">V</span>
+
+              <span className="text-base text-gray-500 dark:text-gray-400">
+                {t.powerFlowDCBus}
               </span>
-              <span className="text-xs text-gray-500 dark:text-gray-400">{t.powerFlowACInterlink}</span>
+
+              <span className="mt-1 text-xl font-semibold tabular-nums text-gray-900 dark:text-white">
+                {data.dcBusVoltage === null
+                  ? '—'
+                  : data.dcBusVoltage.toFixed(1)}
+                <span className="ml-1 text-base text-gray-500 dark:text-gray-400">
+                  V
+                </span>
+              </span>
+
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {t.powerFlowACInterlink}
+              </span>
             </div>
           </>
         )}
       </div>
-      <div className="grid grid-cols-1 gap-6 px-6 py-8 sm:grid-cols-2 md:hidden">
-        <FlowItem icon={Sun} title={t.powerFlowSolarGeneration} power={data.solar}
-          status={solarStatus} description={solarDescription} color="yellow" />
-        <FlowItem icon={Cable} title={t.powerFlowGridInterconnection} power={data.interlink}
-          status={gridStatus} description={t.powerFlowACInterlink} color="blue" />
-        <FlowItem icon={CarFront} title={t.powerFlowEVCharging} power={null}
-          status={t.powerFlowLiveUnavailable} description={t.powerFlowCompletedSessions} />
-        <FlowItem icon={BatteryCharging} title={t.powerFlowBatteryStorage} power={null}
-          status={t.powerFlowDataUnavailable} description={t.powerFlowStorageSystem} color="green" />
-        <FlowItem icon={Truck} title={t.powerFlowForklift} power={null}
-          status={t.powerFlowDataUnavailable} description={`— kWh ${t.powerFlowThisSession}`} />
-        <div className="flex flex-col items-center justify-center gap-1 text-gray-500 dark:text-gray-400">
-          <Zap className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-          <span className="text-sm font-semibold">{t.powerFlowDCBus}</span>
-          <span className="text-lg">{data.dcBusVoltage === null ? '—' : data.dcBusVoltage.toFixed(1)} V</span>
-          <span className="text-xs">{t.powerFlowACInterlink}</span>
-        </div>
+    </div>
+
+    {/* ---------- Móvil ---------- */}
+    <div className="grid grid-cols-1 gap-6 px-6 py-8 sm:grid-cols-2 md:hidden">
+      <FlowItem
+        icon={Sun}
+        title={t.powerFlowSolarGeneration}
+        power={data.solar}
+        status={solarStatus}
+        description={solarDescription}
+        color="yellow"
+      />
+
+      <FlowItem
+        icon={Cable}
+        title={t.powerFlowGridInterconnection}
+        power={data.interlink}
+        status={gridStatus}
+        description={t.powerFlowACInterlink}
+        color="blue"
+      />
+
+      <FlowItem
+        icon={CarFront}
+        title={t.powerFlowEVCharging}
+        power={null}
+        status={t.powerFlowLiveUnavailable}
+        description={t.powerFlowCompletedSessions}
+      />
+
+      <FlowItem
+        icon={BatteryCharging}
+        title={t.powerFlowBatteryStorage}
+        power={null}
+        status={t.powerFlowDataUnavailable}
+        description={t.powerFlowStorageSystem}
+        color="green"
+      />
+
+      <FlowItem
+        icon={Truck}
+        title={t.powerFlowForklift}
+        power={null}
+        status={t.powerFlowDataUnavailable}
+        description={`— kWh ${t.powerFlowThisSession}`}
+      />
+
+      <div className="flex flex-col items-center justify-center gap-1 text-gray-500 dark:text-gray-400">
+        <Zap className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+
+        <span className="text-sm font-semibold">
+          {t.powerFlowDCBus}
+        </span>
+
+        <span className="text-lg">
+          {data.dcBusVoltage === null
+            ? '—'
+            : data.dcBusVoltage.toFixed(1)} V
+        </span>
+
+        <span className="text-xs">
+          {t.powerFlowACInterlink}
+        </span>
       </div>
-    </section>
-  );
+    </div>
+  </section>
+);
 }
+
