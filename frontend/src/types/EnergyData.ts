@@ -16,6 +16,7 @@ export const PV_DEVICE_ID = 200;
 export const PV_POWER_MEAN = 202;
 export const INTERLINK_DEVICE_ID = 201;
 export const GRID_ACTIVE_POWER = 257;
+export const DC_BUS_VOLTAGE = 231;
 
 export interface PhaseData {
   P?: number;

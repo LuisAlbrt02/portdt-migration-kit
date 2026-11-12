@@ -315,11 +315,11 @@ export default function SHIFT2DCPage() {
               <Network className="mt-1 h-6 w-6 shrink-0 text-blue-600 dark:text-blue-400" />
 
               <div>
-                <h3 className="font-bold text-gray-900 dark:text-white">
+                <h3 className="font-bold text-lg text-gray-900 dark:text-white">
                   {t.shift2dcGridArchitectureTitle}
                 </h3>
 
-                <p className="mt-1 max-w-2xl text-sm text-gray-600 dark:text-gray-400">
+                <p className="mt-1 max-w-2xl text-base text-gray-600 dark:text-gray-400">
                   {t.shift2dcGridArchitectureDescription}
                 </p>
               </div>
