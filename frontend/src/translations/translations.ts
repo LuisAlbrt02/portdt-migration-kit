@@ -394,7 +394,16 @@ export const translations = {
     consumptionFor: 'consumption for',
     energyUsagePatterns: 'energy usage patterns',
     averageDailyPowerW: 'Average Daily Power (W)',
-    
+    powerByDeviceOverTime: 'Power by device over time',
+    selectedDevice: 'Selected device',
+    separateSeriesForEachDevice: 'Separate series for each device',
+    historicalData: 'Historical data',
+    averageDailyPower: 'Average daily power',
+    averageHourlyPower: 'Average hourly power',
+    averagePowerDescription: 'Mean of available readings, separated by device; not energy consumption (kWh)',
+
+
+
     // Simulation Monitor
     waitingForSimulation: 'Waiting for simulation...',
     connecting: 'Connecting...',
@@ -872,7 +881,7 @@ export const translations = {
     configureSystem: 'Configurar Sistema',
     summaryStatistics: 'Estatísticas Resumo',
     dataPoints: 'Pontos de Dados',
-    peakPower: 'Potência de Pico',
+    peakPower: 'Pico de Potência',
     averagePower: 'Potência Média',
     totalEnergy: 'Energia Total',
     
@@ -1057,7 +1066,13 @@ export const translations = {
     consumptionFor: 'consumo para',
     energyUsagePatterns: 'padrões de uso de energia',
     averageDailyPowerW: 'Potência Diária Média (W)',
-    
+    powerByDeviceOverTime: 'Potência por dispositivo ao longo do tempo',
+    selectedDevice: 'Dispositivo selecionado',
+    separateSeriesForEachDevice: 'Séries separadas por dispositivo',
+    historicalData: 'Dados históricos',
+    averageDailyPower: 'Potência média diária',
+    averageHourlyPower: 'Potência média horária',
+    averagePowerDescription: 'Média das leituras disponíveis, separadas por dispositivo; não representa o consumo de energia (kWh)',
     // Simulation Monitor
     waitingForSimulation: 'A aguardar simulação...',
     connecting: 'A ligar...',

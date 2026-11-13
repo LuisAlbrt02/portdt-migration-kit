@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -7,15 +8,21 @@ import DataDisplay from '../../components/historical-data/DataDisplay';
 import { useTranslation } from '../../hooks/useTranslation';
 import { authService } from '../../lib/Auth';
 import type { EnergyData } from '../../types/EnergyData';
+import {
+  PV_POWER_MEAN,
+  GRID_ACTIVE_POWER,
+} from '../../types/EnergyData';
 
 type DateRangeType = 'single' | '3days' | 'week' | 'custom';
 type SeriesRecord = [number, number, number, string, number];
+type DeviceType = 'meter' | 'pv';
 
-interface Meter {
+interface MeterPVDevice {
   id: number;
-  idSite: number;
+  idSite: number | null;
   name: string;
   tags: number[];
+  device_type: DeviceType;
   extra?: string | { friendlyName?: string } | null;
 }
 
@@ -33,13 +40,19 @@ interface SeriesResponse {
   series: SeriesItem[];
 }
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
+
+const DEVICES_URL = `${BACKEND_URL}/api/devices`;
+const SERIES_URL = `${BACKEND_URL}/api/series/data_lake`;
+
+const PORT_SITE_ID = 3;
 const ACTIVE_POWER_UNIT = 12;
 const ACTIVE_POWER_L1 = 6;
 const ACTIVE_POWER_L2 = 7;
 const ACTIVE_POWER_L3 = 8;
 
-function getToday() {
+function getToday(): string {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -47,13 +60,17 @@ function getToday() {
   return `${year}-${month}-${day}`;
 }
 
-function addDays(date: string, days: number) {
+function addDays(date: string, days: number): string {
   const value = new Date(`${date}T00:00:00Z`);
   value.setUTCDate(value.getUTCDate() + days);
   return value.toISOString().split('T')[0];
 }
 
-function getDateRange(selectedDate: string, endDate: string, type: DateRangeType) {
+function getDateRange(
+  selectedDate: string,
+  endDate: string,
+  type: DateRangeType
+) {
   const today = getToday();
 
   if (type === '3days') {
@@ -83,12 +100,43 @@ function getDateRange(selectedDate: string, endDate: string, type: DateRangeType
   };
 }
 
+function getDeviceMetrics(device: MeterPVDevice): number[] {
+  if (device.device_type === 'meter') {
+    return [
+      ACTIVE_POWER_L1,
+      ACTIVE_POWER_L2,
+      ACTIVE_POWER_L3,
+    ];
+  }
+
+  if (device.device_type === 'pv') {
+    const name = device.name.toLowerCase().trim();
+
+    if (name.includes('interlink')) {
+      return [GRID_ACTIVE_POWER];
+    }
+
+    if (name.includes('pv')) {
+      return [PV_POWER_MEAN];
+    }
+  }
+
+  return [];
+}
+
+function getDeviceUnit(device: MeterPVDevice): number[] {
+  return device.device_type === 'meter'
+    ? [ACTIVE_POWER_UNIT]
+    : [];
+}
+
 function buildHistoricalPayload(
   siteId: number,
   selectedDevice: string | null,
   selectedDate: string,
   endDate: string,
-  dateRangeType: DateRangeType
+  dateRangeType: DateRangeType,
+  devices: MeterPVDevice[]
 ) {
   const { start_dtm, end_dtm } = getDateRange(
     selectedDate,
@@ -96,33 +144,44 @@ function buildHistoricalPayload(
     dateRangeType
   );
 
-  const specificDevice = selectedDevice !== null;
+  const selectedDevices = selectedDevice
+    ? devices.filter(device => String(device.id) === selectedDevice)
+    : devices;
+
+  const series = selectedDevices
+    .filter(device => device.idSite === siteId)
+    .map(device => ({
+      sources: ['data_lake'],
+      site: [siteId],
+      site_type: ['port'],
+      device: [device.id],
+      device_type: [],
+      metric_type: getDeviceMetrics(device),
+      unit: getDeviceUnit(device),
+      field: 'default',
+    }))
+    .filter(item => item.metric_type.length > 0);
 
   return {
     start_dtm,
     end_dtm,
-    series: [{
-      sources: ['data_lake'],
-      site: [siteId],
-      site_type: ['port'],
-      device: specificDevice ? [Number(selectedDevice)] : [],
-      device_type: specificDevice ? [] : ['meter'],
-      metric_type: [0],
-      unit: [ACTIVE_POWER_UNIT],
-      field: 'default',
-    }],
+    series,
   };
 }
 
-function getMeterFriendlyName(meter: Meter): string | null {
-  if (!meter.extra) return null;
+function getDeviceFriendlyName(
+  device: MeterPVDevice
+): string | null {
+  if (!device.extra) return null;
 
   try {
-    const extra = typeof meter.extra === 'string'
-      ? JSON.parse(meter.extra)
-      : meter.extra;
+    const extra =
+      typeof device.extra === 'string'
+        ? JSON.parse(device.extra)
+        : device.extra;
 
-    return typeof extra?.friendlyName === 'string' && extra.friendlyName.trim()
+    return typeof extra?.friendlyName === 'string' &&
+      extra.friendlyName.trim()
       ? extra.friendlyName.trim()
       : null;
   } catch {
@@ -130,28 +189,70 @@ function getMeterFriendlyName(meter: Meter): string | null {
   }
 }
 
-function transformAtlasData(data: SeriesResponse, meters: Meter[]): EnergyData[] {
+function normalizeDevices(data: unknown): MeterPVDevice[] {
+  if (!Array.isArray(data)) {
+    throw new Error('Devices API returned an invalid response.');
+  }
+
+  return data
+    .filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === 'object' && item !== null
+    )
+    .filter(item =>
+      item.device_type === 'meter' ||
+      item.device_type === 'pv'
+    )
+    .filter(item =>
+      item.idSite != null &&
+      Number(item.idSite) === PORT_SITE_ID
+    )
+    .map((item): MeterPVDevice => ({
+      id: Number(item.id),
+      idSite: Number(item.idSite),
+      name: String(item.name || `Device ${item.id}`),
+      device_type: item.device_type as DeviceType,
+      tags: Array.isArray(item.tags)
+        ? item.tags.map(Number)
+        : [],
+      extra: item.extra as MeterPVDevice['extra'],
+    }))
+    .filter(device => Number.isFinite(device.id));
+}
+
+function transformAtlasData(
+  data: SeriesResponse,
+  devices: MeterPVDevice[]
+): EnergyData[] {
   if (!Array.isArray(data.series)) return [];
 
   const rows = new Map<string, EnergyData>();
-  const meterNames = new Map(
-    meters.map(meter => [meter.id, meter.name])
+  const deviceById = new Map(
+    devices.map(device => [device.id, device])
   );
 
-  data.series.forEach(series => {
-    if (
-      series.metric_type !== ACTIVE_POWER_L1 &&
-      series.metric_type !== ACTIVE_POWER_L2 &&
-      series.metric_type !== ACTIVE_POWER_L3
-    ) return;
+  for (const series of data.series) {
+    if (!Array.isArray(series.records)) continue;
 
-    series.records.forEach(record => {
-      const deviceId = record[1];
-      const metricType = record[2];
+    for (const record of series.records) {
+      const deviceId = Number(record[1]);
+      const metricType = Number(record[2]);
       const timestamp = record[3];
       const value = record[4];
+      const device = deviceById.get(deviceId);
 
-      if (typeof value !== 'number' || !Number.isFinite(value)) return;
+      if (
+        !device ||
+        !timestamp ||
+        typeof value !== 'number' ||
+        !Number.isFinite(value)
+      ) {
+        continue;
+      }
+
+      if (!getDeviceMetrics(device).includes(metricType)) {
+        continue;
+      }
 
       const key = `${deviceId}-${timestamp}`;
       let row = rows.get(key);
@@ -161,7 +262,7 @@ function transformAtlasData(data: SeriesResponse, meters: Meter[]): EnergyData[]
           _id: key,
           timestamp,
           device: String(deviceId),
-          deviceName: meterNames.get(deviceId) || `Device ${deviceId}`,
+          deviceName: device.name,
           L1: { P: 0 },
           L2: { P: 0 },
           L3: { P: 0 },
@@ -172,16 +273,29 @@ function transformAtlasData(data: SeriesResponse, meters: Meter[]): EnergyData[]
         rows.set(key, row);
       }
 
-      if (metricType === ACTIVE_POWER_L1 && row.L1) row.L1.P = value;
-      if (metricType === ACTIVE_POWER_L2 && row.L2) row.L2.P = value;
-      if (metricType === ACTIVE_POWER_L3 && row.L3) row.L3.P = value;
+      if (device.device_type === 'meter') {
+        if (metricType === ACTIVE_POWER_L1 && row.L1) {
+          row.L1.P = value;
+        }
 
-      row.measure_cons =
-        (row.L1?.P || 0) +
-        (row.L2?.P || 0) +
-        (row.L3?.P || 0);
-    });
-  });
+        if (metricType === ACTIVE_POWER_L2 && row.L2) {
+          row.L2.P = value;
+        }
+
+        if (metricType === ACTIVE_POWER_L3 && row.L3) {
+          row.L3.P = value;
+        }
+
+        row.measure_cons =
+          (row.L1?.P ?? 0) +
+          (row.L2?.P ?? 0) +
+          (row.L3?.P ?? 0);
+      } else {
+        // Multiply by -1 (VALUES FROM PV ARE CURRENTLY NEGATIVE)
+        row.measure_cons = metricType === PV_POWER_MEAN ? -value : value;
+      }
+    }
+  }
 
   return Array.from(rows.values()).sort(
     (a, b) =>
@@ -194,69 +308,55 @@ export default function HistoricalPortDataPage() {
   const t = useTranslation();
   const router = useRouter();
 
-  const [meters, setMeters] = useState<Meter[]>([]);
+  const [devices, setDevices] = useState<MeterPVDevice[]>([]);
   const [filteredData, setFilteredData] = useState<EnergyData[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(getToday());
   const [endDate, setEndDate] = useState(getToday());
-  const [dateRangeType, setDateRangeType] = useState<DateRangeType>('single');
-  const [isLoadingMeters, setIsLoadingMeters] = useState(true);
+  const [dateRangeType, setDateRangeType] =
+    useState<DateRangeType>('single');
+
+  const [isLoadingDevices, setIsLoadingDevices] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /*
-   * Lista utilizada por DataDisplay.
-   * Aquí mantenemos únicamente D1, D2, D3...
-   * para que la tabla no cambie.
-   */
   const allDeviceList = useMemo(() => {
-    return [...meters]
+    return [...devices]
       .sort((a, b) =>
         a.name.localeCompare(b.name, undefined, {
           numeric: true,
           sensitivity: 'base',
         })
       )
-      .map(meter => {
-        const name = meter.name || `Device ${meter.id}`;
-        const friendlyName = getMeterFriendlyName(meter);
+      .map(device => {
+        const name = device.name || `Device ${device.id}`;
+        const friendlyName = getDeviceFriendlyName(device);
 
         return {
-          id: String(meter.id),
-          name: friendlyName ? `${name} • ${friendlyName}` : name,
-        };
-      });
-  }, [meters]);
-
-  const selectDeviceList = useMemo(() => {
-    return [...meters]
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, {
-          numeric: true,
-          sensitivity: 'base',
-        })
-      )
-      .map(meter => {
-        const shortName = meter.name || `Device ${meter.id}`;
-        const friendlyName = getMeterFriendlyName(meter);
-
-        return {
-          id: String(meter.id),
+          id: String(device.id),
           name: friendlyName
-            ? `${shortName} - ${friendlyName}`
-            : shortName,
+            ? `${name} • ${friendlyName}`
+            : name,
         };
       });
-  }, [meters]);
+  }, [devices]);
 
   const selectActiveDeviceList = useMemo(() => {
-    const activeIds = new Set(filteredData.map(item => item.device));
-    return allDeviceList.filter(device => activeIds.has(device.id));
+    const activeIds = new Set(
+      filteredData.map(item => item.device)
+    );
+
+    return allDeviceList.filter(device =>
+      activeIds.has(device.id)
+    );
   }, [filteredData, allDeviceList]);
 
   useEffect(() => {
-    const loadMeters = async () => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const loadDevices = async () => {
       const token = authService.getToken();
       const tokenType = authService.getTokenType();
 
@@ -267,16 +367,23 @@ export default function HistoricalPortDataPage() {
       }
 
       try {
-        setIsLoadingMeters(true);
+        setIsLoadingDevices(true);
         setError(null);
 
-        const response = await fetch(`${BACKEND_URL}/api/meters`, {
+        console.log('Devices API URL:', DEVICES_URL);
+
+        const response = await fetch(DEVICES_URL, {
           headers: {
             Accept: 'application/json',
             Authorization: `${tokenType} ${token}`,
           },
           cache: 'no-store',
+          signal: controller.signal,
         });
+
+        if (cancelled) return;
+
+        console.log('Devices API status:', response.status);
 
         if (response.status === 401) {
           authService.logout();
@@ -285,28 +392,81 @@ export default function HistoricalPortDataPage() {
         }
 
         if (!response.ok) {
-          throw new Error(`Meters API ${response.status}`);
+          const body = await response.text();
+
+          console.error('Devices API response body:', body);
+
+          throw new Error(
+            `Devices API ${response.status} (${response.url})`
+          );
         }
 
-        setMeters((await response.json()) as Meter[]);
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : 'Failed to load meters';
+        const json: unknown = await response.json();
 
-        console.error('Historical meters error:', message);
+        if (cancelled) return;
+
+        console.log('All devices received:', json);
+
+        if (!Array.isArray(json)) {
+          throw new Error(
+            'Devices API returned an invalid response.'
+          );
+        }
+
+        const portDevices = normalizeDevices(json);
+
+        const meters = portDevices.filter(
+          device => device.device_type === 'meter'
+        );
+
+        const pvs = portDevices.filter(
+          device => device.device_type === 'pv'
+        );
+
+        console.log('Filtered devices:', portDevices);
+        console.log('Meter devices:', meters);
+        console.log('PV / Interlink devices:', pvs);
+
+        console.log('Devices loaded:', {
+          total: portDevices.length,
+          meters: meters.length,
+          pvs: pvs.length,
+        });
+
+        if (!cancelled) {
+          setDevices(portDevices);
+        }
+      } catch (err) {
+        if (
+          cancelled ||
+          (err instanceof Error && err.name === 'AbortError')
+        ) return;
+
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Failed to load devices';
+
+        console.error('Historical devices error:', message);
         setError(message);
+        setDevices([]);
       } finally {
-        setIsLoadingMeters(false);
+        if (!cancelled) {
+          setIsLoadingDevices(false);
+        }
       }
     };
 
-    void loadMeters();
+    void loadDevices();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [router]);
 
   const fetchHistoricalData = async () => {
-    if (!meters.length) return;
+    if (!devices.length) return;
 
     const token = authService.getToken();
     const tokenType = authService.getTokenType();
@@ -320,16 +480,9 @@ export default function HistoricalPortDataPage() {
     if (
       dateRangeType === 'custom' &&
       new Date(`${endDate}T00:00:00Z`) <
-      new Date(`${selectedDate}T00:00:00Z`)
+        new Date(`${selectedDate}T00:00:00Z`)
     ) {
       setError('End date cannot be earlier than start date.');
-      return;
-    }
-
-    const siteId = meters[0]?.idSite;
-
-    if (siteId === undefined) {
-      setError('Site could not be determined.');
       return;
     }
 
@@ -338,30 +491,28 @@ export default function HistoricalPortDataPage() {
       setError(null);
 
       const payload = buildHistoricalPayload(
-        siteId,
+        PORT_SITE_ID,
         selectedDevice,
         selectedDate,
         endDate,
-        dateRangeType
+        dateRangeType,
+        devices
       );
 
       console.log(
-        '📚 Historical request:',
+        'Historical request:',
         JSON.stringify(payload, null, 2)
       );
 
-      const response = await fetch(
-        `${BACKEND_URL}/api/series/data_lake`,
-        {
-          method: 'POST',
-          headers: {
-            Accept: 'application/json',
-            Authorization: `${tokenType} ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        }
-      );
+      const response = await fetch(SERIES_URL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `${tokenType} ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
 
       if (response.status === 401) {
         authService.logout();
@@ -371,24 +522,48 @@ export default function HistoricalPortDataPage() {
 
       if (!response.ok) {
         const body = await response.text();
+
         throw new Error(
           `Historical API ${response.status}: ${body}`
         );
       }
 
-      const data = (await response.json()) as SeriesResponse;
-      const transformedData = transformAtlasData(data, meters);
+      const data =
+        (await response.json()) as SeriesResponse;
+
+      if (!Array.isArray(data.series)) {
+        throw new Error('Invalid historical series response.');
+      }
+
+      console.table(
+        data.series.map(series => ({
+          device: series.device,
+          metric: series.metric_type,
+          records: series.records?.length ?? 0,
+        }))
+      );
+
+      const transformedData = transformAtlasData(
+        data,
+        devices
+      );
 
       console.log(
-        `📚 Historical records transformed: ${transformedData.length}`
+        'Historical records transformed:',
+        transformedData.length
+      );
+
+      console.log(
+        'Historical devices with data:',
+        [...new Set(transformedData.map(item => item.device))]
       );
 
       setFilteredData(transformedData);
       setHasSearched(true);
-    } catch (error) {
+    } catch (err) {
       const message =
-        error instanceof Error
-          ? error.message
+        err instanceof Error
+          ? err.message
           : 'Failed to load historical data';
 
       console.error('Historical data error:', message);
@@ -401,18 +576,13 @@ export default function HistoricalPortDataPage() {
     }
   };
 
-  /*
-   * Ejecuta automáticamente Single Day al cargar la página
-   * y vuelve a consultar cuando cambia el rango temporal.
-   */
   useEffect(() => {
-    if (!meters.length || isLoadingMeters) return;
+    if (!devices.length || isLoadingDevices) return;
 
     void fetchHistoricalData();
 
-    // fetchHistoricalData intentionally uses the current page state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRangeType, meters.length, isLoadingMeters]);
+  }, [dateRangeType, devices, isLoadingDevices]);
 
   const handleDateChange = (
     event: React.ChangeEvent<HTMLInputElement>
@@ -420,7 +590,10 @@ export default function HistoricalPortDataPage() {
     const value = event.target.value;
     setSelectedDate(value);
 
-    if (dateRangeType === 'custom' && endDate < value) {
+    if (
+      dateRangeType === 'custom' &&
+      endDate < value
+    ) {
       setEndDate(value);
     }
   };
@@ -466,7 +639,7 @@ export default function HistoricalPortDataPage() {
           }
         />
 
-        {isLoadingMeters || (!hasSearched && isSearching) ? (
+        {isLoadingDevices || (!hasSearched && isSearching) ? (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent" />
             <p className="mt-3 text-gray-600 dark:text-gray-400">
@@ -485,7 +658,7 @@ export default function HistoricalPortDataPage() {
         ) : (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center border border-gray-200 dark:border-gray-700">
             <p className="text-gray-600 dark:text-gray-400">
-              {t.loadingData}
+              {error || t.loadingData}
             </p>
           </div>
         )}

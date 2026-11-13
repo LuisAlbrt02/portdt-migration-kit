@@ -5,6 +5,7 @@ import authRoutes from './routes/authRoutes';
 import meterRoutes from './routes/metersRoutes';
 import seriesRoutes from './routes/seriesRoutes';
 import boatRoutes from './routes/boatRoutes';
+import devicesRoutes from './routes/devicesRoutes'
 
 const app = express();
 
@@ -29,13 +30,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/meters', meterRoutes);
 app.use('/api/series', seriesRoutes);
-
-/*
- * Port Digital Twin boat endpoints.
- *
- * GET /api/boats
- * GET /api/boats/geofence
- */
+app.use('/api/devices', devicesRoutes)
 app.use('/api/boats', boatRoutes);
 
 /*
