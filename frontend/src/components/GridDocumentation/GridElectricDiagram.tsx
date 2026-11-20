@@ -1,5 +1,5 @@
-'use client';
 
+'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Info, Maximize2, X, ZoomIn, ZoomOut, Scan } from 'lucide-react';
@@ -8,14 +8,13 @@ import {
   Controls, MiniMap, Panel, useReactFlow, useViewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-
 import { authService } from '../../lib/Auth';
 import { useTranslation } from '../../hooks/useTranslation';
 import {
   COLORS, VARIANTS, nodeTypes, edgeTypes, buildGraph,
   normalCircuits, emergencyCircuits, demonstratorEquipment,
   type BreakerData, type BusData, type EndPanelData,
-} from './ElectricDiagram.config';
+} from './GridElectricDiagram.config';
 
 interface Meter {
   id: number;
@@ -48,7 +47,6 @@ const DATA_WINDOW_MINUTES = 15;
 
 function getMeterFriendlyName(meter: Meter): string | null {
   if (!meter.extra) return null;
-
   try {
     const extra = typeof meter.extra === 'string' ? JSON.parse(meter.extra) : meter.extra;
     return typeof extra?.friendlyName === 'string' && extra.friendlyName.trim()
@@ -60,33 +58,25 @@ function getMeterFriendlyName(meter: Meter): string | null {
 }
 
 function normalizeName(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 function buildPowerPayload(siteId: number) {
   const end = new Date();
   const start = new Date(end.getTime() - DATA_WINDOW_MINUTES * 60 * 1000);
-
   return {
     start_dtm: start.toISOString(),
     end_dtm: end.toISOString(),
-    series: [
-      {
-        sources: ['data_lake'],
-        site: [siteId],
-        site_type: ['port'],
-        device: [],
-        device_type: ['meter'],
-        metric_type: [0],
-        unit: [ACTIVE_POWER_UNIT],
-        field: 'default',
-      },
-    ],
+    series: [{
+      sources: ['data_lake'],
+      site: [siteId],
+      site_type: ['port'],
+      device: [],
+      device_type: ['meter'],
+      metric_type: [0],
+      unit: [ACTIVE_POWER_UNIT],
+      field: 'default',
+    }],
   };
 }
 
@@ -95,7 +85,6 @@ function buildDevicePowerMap(data: SeriesResponse, meters: Meter[]): Map<string,
 
   data.series?.forEach((series) => {
     if (!ACTIVE_POWER_METRICS.includes(series.metric_type)) return;
-
     series.records?.forEach((record) => {
       const deviceId = record[1] ?? series.device;
       const metricType = record[2];
@@ -105,14 +94,12 @@ function buildDevicePowerMap(data: SeriesResponse, meters: Meter[]): Map<string,
       if (!Number.isFinite(timestamp) || typeof value !== 'number' || !Number.isFinite(value)) return;
 
       let deviceMetrics = latestValues.get(deviceId);
-
       if (!deviceMetrics) {
         deviceMetrics = new Map();
         latestValues.set(deviceId, deviceMetrics);
       }
 
       const previous = deviceMetrics.get(metricType);
-
       if (!previous || timestamp > previous.timestamp) {
         deviceMetrics.set(metricType, { timestamp, value });
       }
@@ -120,28 +107,37 @@ function buildDevicePowerMap(data: SeriesResponse, meters: Meter[]): Map<string,
   });
 
   const result = new Map<string, number>();
-
   meters.forEach((meter) => {
     const metrics = latestValues.get(meter.id);
     if (!metrics) return;
 
-    const powerW =
-      (metrics.get(6)?.value || 0) +
-      (metrics.get(7)?.value || 0) +
-      (metrics.get(8)?.value || 0);
-
+    const powerW = (metrics.get(6)?.value || 0) + (metrics.get(7)?.value || 0) + (metrics.get(8)?.value || 0);
     const powerKW = Math.max(0, powerW / 1000);
     const friendlyName = getMeterFriendlyName(meter);
 
     result.set(meter.name, powerKW);
-
     if (friendlyName) {
       result.set(friendlyName, powerKW);
       result.set(`${meter.name} - ${friendlyName}`, powerKW);
     }
   });
-
   return result;
+}
+
+// Find the latest valid timestamp from active-power records
+function getLatestRecordTimestamp(data: SeriesResponse): Date | null {
+  let latest = -Infinity;
+  for (const series of data.series ?? []) {
+    if (!ACTIVE_POWER_METRICS.includes(series.metric_type)) continue;
+    for (const record of series.records ?? []) {
+      const timestamp = new Date(record[3]).getTime();
+      const value = Number(record[4]);
+      if (Number.isFinite(timestamp) && Number.isFinite(value) && timestamp > latest) {
+        latest = timestamp;
+      }
+    }
+  }
+  return Number.isFinite(latest) ? new Date(latest) : null;
 }
 
 const MIN_ZOOM = 0.1;
@@ -154,9 +150,9 @@ function DiagramInner() {
   const { zoom } = useViewport();
 
   const [devicePowerMap, setDevicePowerMap] = useState<Map<string, number>>(new Map());
+  const [lastRecordTimestamp, setLastRecordTimestamp] = useState<Date | null>(null);
   const [selectedComponent, setSelectedComponent] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-
 
   useEffect(() => {
     let cancelled = false;
@@ -185,17 +181,11 @@ function DiagramInner() {
           router.replace('/login');
           return;
         }
-
-        if (!meterResponse.ok) {
-          throw new Error(`Meters API ${meterResponse.status}`);
-        }
+        if (!meterResponse.ok) throw new Error(`Meters API ${meterResponse.status}`);
 
         const meters = (await meterResponse.json()) as Meter[];
         const siteId = meters[0]?.idSite;
-
-        if (siteId === undefined) {
-          throw new Error('Port site could not be determined.');
-        }
+        if (siteId === undefined) throw new Error('Port site could not be determined.');
 
         const powerResponse = await fetch(`${BACKEND_URL}/api/series/data_lake`, {
           method: 'POST',
@@ -212,15 +202,13 @@ function DiagramInner() {
           router.replace('/login');
           return;
         }
-
-        if (!powerResponse.ok) {
-          throw new Error(`Power API ${powerResponse.status}`);
-        }
+        if (!powerResponse.ok) throw new Error(`Power API ${powerResponse.status}`);
 
         const data = (await powerResponse.json()) as SeriesResponse;
 
         if (!cancelled) {
           setDevicePowerMap(buildDevicePowerMap(data, meters));
+          setLastRecordTimestamp(getLatestRecordTimestamp(data));
         }
       } catch (error) {
         console.error(
@@ -245,20 +233,15 @@ function DiagramInner() {
         const value = devicePowerMap.get(deviceName);
         if (value !== undefined) return value;
       }
-
       if (panelName) {
         const value = devicePowerMap.get(panelName);
         if (value !== undefined) return value;
 
         const normalizedPanel = normalizeName(panelName);
-
         for (const [name, power] of devicePowerMap.entries()) {
-          if (normalizeName(name).includes(normalizedPanel)) {
-            return power;
-          }
+          if (normalizeName(name).includes(normalizedPanel)) return power;
         }
       }
-
       return undefined;
     },
     [devicePowerMap],
@@ -274,7 +257,6 @@ function DiagramInner() {
       () => void fitView({ duration: 300, padding: 0.05 }),
       50
     );
-
     return () => window.clearTimeout(id);
   }, [isFullscreen, fitView]);
 
@@ -328,7 +310,6 @@ function DiagramInner() {
               {t.shift2dcDiagramTitle}
             </h2>
           </div>
-
           <div className="flex items-center gap-2">
             <button
               onClick={() => void zoomOut({ duration: 150 })}
@@ -337,13 +318,9 @@ function DiagramInner() {
             >
               <ZoomOut className="h-4 w-4 text-slate-300" />
             </button>
-
             <div className="min-w-[60px] rounded-lg bg-slate-700 px-3 py-1.5 text-center">
-              <span className="text-sm text-slate-300">
-                {Math.round(zoom * 100)}%
-              </span>
+              <span className="text-sm text-slate-300">{Math.round(zoom * 100)}%</span>
             </div>
-
             <button
               onClick={() => void zoomIn({ duration: 150 })}
               disabled={zoom >= MAX_ZOOM}
@@ -351,9 +328,7 @@ function DiagramInner() {
             >
               <ZoomIn className="h-4 w-4 text-slate-300" />
             </button>
-
             <div className="mx-1 h-6 w-px bg-slate-600" />
-
             <button
               onClick={() => void fitView({ duration: 300, padding: 0.05 })}
               className="rounded-lg bg-slate-700 p-2.5 hover:bg-slate-600"
@@ -361,7 +336,6 @@ function DiagramInner() {
             >
               <Scan className="h-4 w-4 text-slate-300" />
             </button>
-
             <button
               onClick={() => setIsFullscreen((value) => !value)}
               className="rounded-lg bg-slate-700 p-2.5 hover:bg-slate-600"
@@ -397,9 +371,7 @@ function DiagramInner() {
           proOptions={{ hideAttribution: true }}
           defaultEdgeOptions={{ markerEnd: undefined }}
           onNodeClick={(_, node) => {
-            if (node.type !== 'bus') {
-              setSelectedComponent(node.id);
-            }
+            if (node.type !== 'bus') setSelectedComponent(node.id);
           }}
           onPaneClick={() => setSelectedComponent(null)}
           style={{ background: '#f9fbfd' }}
@@ -410,7 +382,6 @@ function DiagramInner() {
             lineWidth={0.5}
             color="#e2e8f0"
           />
-
           <Background
             id="dots"
             variant={BackgroundVariant.Dots}
@@ -418,9 +389,7 @@ function DiagramInner() {
             size={1}
             color="#cbd5e1"
           />
-
           <Controls showInteractive={false} position="bottom-left" />
-
           <MiniMap
             pannable
             zoomable
@@ -429,20 +398,32 @@ function DiagramInner() {
             nodeStrokeWidth={2}
             nodeColor={(node) => {
               const data = node.data as Partial<BreakerData & BusData & EndPanelData>;
-
               if (data.color) return data.color;
               if (data.variant) return VARIANTS[data.variant].stroke;
-
               return '#94a3b8';
             }}
           />
 
+          {/* Latest active-power record timestamp */}
+          <Panel position="bottom-left" className="!mb-2 !ml-14">
+            <div className="text-[10px] text-slate-400">
+              Last data record: {lastRecordTimestamp
+                ? lastRecordTimestamp.toLocaleString('en-GB', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                  })
+                : 'N/A'}
+            </div>
+          </Panel>
+
           <Panel position="top-right">
             <div className="rounded-lg border border-slate-200 bg-white/95 p-3 text-xs shadow-md backdrop-blur">
-              <div className="mb-2 font-bold text-slate-800">
-                {t.shift2dcLegend}
-              </div>
-
+              <div className="mb-2 font-bold text-slate-800">{t.shift2dcLegend}</div>
               <div className="space-y-1.5">
                 {legend.map((item) => (
                   <div key={item.l} className="flex items-center gap-2 text-slate-700">
@@ -450,12 +431,8 @@ function DiagramInner() {
                     {item.l}
                   </div>
                 ))}
-
                 <div className="flex items-center gap-2 text-slate-700">
-                  <span
-                    className="w-4 border-t-2 border-dashed"
-                    style={{ borderColor: COLORS.emergency }}
-                  />
+                  <span className="w-4 border-t-2 border-dashed" style={{ borderColor: COLORS.emergency }} />
                   {t.shift2dcBackup}
                 </div>
               </div>
@@ -473,19 +450,14 @@ function DiagramInner() {
               >
                 {t.shift2dcSingleLineDiagram}
               </div>
-
               <div className="px-3 py-2 text-center">
                 <div className="text-[11px] font-semibold text-slate-800">
                   Funchal Port - SHIFT2DC
                 </div>
-
                 <div className="text-[10px] text-slate-500">
                   {t.shift2dcElectricalDistribution}
                 </div>
-
-                <div className="text-[10px] text-slate-400">
-                  2026
-                </div>
+                <div className="text-[10px] text-slate-400">2026</div>
               </div>
             </div>
           </Panel>
@@ -497,7 +469,6 @@ function DiagramInner() {
                   <h4 className="font-bold text-slate-900 dark:text-white">
                     {selectedComponent}
                   </h4>
-
                   <button
                     onClick={() => setSelectedComponent(null)}
                     className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
@@ -505,7 +476,6 @@ function DiagramInner() {
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-
                 <p className="text-sm text-slate-600 dark:text-slate-400">
                   {t.shift2dcElectricalComponent}
                 </p>
@@ -514,31 +484,21 @@ function DiagramInner() {
           )}
         </ReactFlow>
       </div>
-      
+
       {/*
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {stats.map((stat, index) => (
-          <div
-            key={index}
-            className={`${stat.bg} rounded-xl border border-slate-200 p-4`}
-          >
+          <div key={index} className={`${stat.bg} rounded-xl border border-slate-200 p-4`}>
             <div className="mb-1 flex items-center gap-2">
               <div className={`h-3 w-3 rounded-full ${stat.color}`} />
-              <span className="text-sm font-semibold text-slate-700">
-                {stat.label}
-              </span>
+              <span className="text-sm font-semibold text-slate-700">{stat.label}</span>
             </div>
-
-            <div className="text-2xl font-bold text-slate-900">
-              {stat.value}
-            </div>
-
-            <div className="text-xs text-slate-500">
-              {stat.desc}
-            </div>
+            <div className="text-2xl font-bold text-slate-900">{stat.value}</div>
+            <div className="text-xs text-slate-500">{stat.desc}</div>
           </div>
         ))}
-      </div> */}
+      </div>
+      */}
     </div>
   );
 }

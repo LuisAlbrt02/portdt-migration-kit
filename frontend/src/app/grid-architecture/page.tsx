@@ -1,6 +1,6 @@
 'use client';
 import { Cable, CircuitBoard, Info, Network, ShieldCheck, Zap } from 'lucide-react';
-import ElectricalDiagram from '../../components/GridDocumentation/ElectricDiagram';
+import ElectricalDiagram from '../../components/GridDocumentation/GridElectricDiagram';
 import PowerFlowDiagram from '../../components/GridDocumentation/PowerFlowDiagram';
 import { useTranslation } from '../../hooks/useTranslation';
 

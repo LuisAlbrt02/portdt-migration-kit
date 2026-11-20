@@ -139,32 +139,32 @@ export default function DataDisplay({
                   <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)}>»</button>
                 </div>
 
-                <div className="flex gap-2">
-                  <button
-                    className="px-3 py-1.5 rounded border text-emerald-700"
-                    onClick={() => exportCsv(visibleRows, deviceNames, `power_${selectedDate}_page-${currentPage}.csv`)}
-                  >
-                    {t.csvPage}
-                  </button>
-                  <button
-                    className="px-3 py-1.5 rounded border text-emerald-700"
-                    onClick={() => exportCsv(filteredData, deviceNames, `power_${selectedDate}_all.csv`)}
-                  >
-                    {t.csvAll}
-                  </button>
-                  <button
-                    className="px-3 py-1.5 rounded border text-red-700"
-                    onClick={() => void exportPdf(visibleRows, deviceNames, `power_${selectedDate}_page-${currentPage}.pdf`)}
-                  >
-                    {t.pdfPage}
-                  </button>
-                  <button
-                    className="px-3 py-1.5 rounded border text-red-700"
-                    onClick={() => void exportPdf(filteredData, deviceNames, `power_${selectedDate}_all.pdf`)}
-                  >
-                    {t.pdfAll}
-                  </button>
-                </div>
+                  <div className="flex gap-2">
+                    <button
+                      className="px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 dark:hover:bg-emerald-900 transition-colors"
+                      onClick={() => exportCsv(visibleRows, deviceNames, `power_${selectedDate}_page-${currentPage}.csv`)}
+                    >
+                      {t.csvPage}
+                    </button>
+                    <button
+                      className="px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 dark:hover:bg-emerald-900 transition-colors"
+                      onClick={() => exportCsv(filteredData, deviceNames, `power_${selectedDate}_all.csv`)}
+                    >
+                      {t.csvAll}
+                    </button>
+                    <button
+                      className="px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900 transition-colors"
+                      onClick={() => void exportPdf(visibleRows, deviceNames, `power_${selectedDate}_page-${currentPage}.pdf`)}
+                    >
+                      {t.pdfPage}
+                    </button>
+                    <button
+                      className="px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900 transition-colors"
+                      onClick={() => void exportPdf(filteredData, deviceNames, `power_${selectedDate}_all.pdf`)}
+                    >
+                      {t.pdfAll}
+                    </button>
+                  </div>
               </div>
 
               <table className="w-full text-left text-sm">

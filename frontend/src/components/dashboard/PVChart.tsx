@@ -4,55 +4,110 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SolarPanel } from 'lucide-react';
 import { Line } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, TimeScale, Tooltip, Legend, Filler, type ChartOptions, type ScriptableContext } from 'chart.js';
+import {
+  Chart as ChartJS, CategoryScale, LinearScale, PointElement,
+  LineElement, TimeScale, Tooltip, Legend, Filler,
+  type ChartOptions, type ScriptableContext
+} from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { authService } from '../../lib/Auth';
-import { PORT_SITE_ID, BUILDING_SITE_TYPE, PV_DEVICE_ID, PV_POWER_MEAN, INTERLINK_DEVICE_ID, GRID_ACTIVE_POWER } from '../../types/EnergyData';
-import { type TimePeriod, getTimePeriodMinutes, getChartStepMs } from './TimeSelector';
+import {
+  PORT_SITE_ID, BUILDING_SITE_TYPE, PV_DEVICE_ID,
+  PV_POWER_MEAN, INTERLINK_DEVICE_ID, GRID_ACTIVE_POWER
+} from '../../types/EnergyData';
+import {
+  type TimePeriod, getTimePeriodMinutes, getChartStepMs,
+  getTodayStartMs, aggregateMinuteValues
+} from './TimeSelector';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, TimeScale, Tooltip, Legend, Filler);
 
 type SeriesRecord = [number, number, number, string, number];
 type Sample = { time: number; watts: number };
-interface SeriesItem { device: number; metric_type: number; records: SeriesRecord[]; }
+
+interface SeriesItem {
+  device: number;
+  metric_type: number;
+  records: SeriesRecord[];
+}
 interface SeriesResponse { series: SeriesItem[]; }
 interface PVChartProps { timePeriod: TimePeriod; }
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
-const PV_COLOR = '#eebb00', INTERLINK_COLOR = '#2563eb';
+const DATA_DELAY_BUFFER_MINUTES = 30;
+const REFRESH_INTERVAL_MS = 60_000;
+const PV_COLOR = '#eebb00';
+const INTERLINK_COLOR = '#2563eb';
 
 function buildPayload(period: TimePeriod) {
-  const end = new Date(), start = new Date(end.getTime() - (getTimePeriodMinutes(period) + 5) * 60_000);
+  const end = new Date();
+  const start = period === 'today'
+    ? new Date(getTodayStartMs())
+    : new Date(
+        end.getTime() -
+        (getTimePeriodMinutes(period) + DATA_DELAY_BUFFER_MINUTES) * 60_000
+      );
+
   return {
-    start_dtm: start.toISOString(), end_dtm: end.toISOString(),
+    start_dtm: start.toISOString(),
+    end_dtm: end.toISOString(),
     series: [
-      { sources: ['data_lake'], site: [PORT_SITE_ID], site_type: [BUILDING_SITE_TYPE], device: [PV_DEVICE_ID], device_type: ['meter'], metric_type: [PV_POWER_MEAN], unit: [0], field: 'default' },
-      { sources: ['data_lake'], site: [PORT_SITE_ID], site_type: [BUILDING_SITE_TYPE], device: [INTERLINK_DEVICE_ID], device_type: ['meter'], metric_type: [GRID_ACTIVE_POWER], unit: [0], field: 'default' }
+      {
+        sources: ['data_lake'],
+        site: [PORT_SITE_ID],
+        site_type: [BUILDING_SITE_TYPE],
+        device: [PV_DEVICE_ID],
+        device_type: ['meter'],
+        metric_type: [PV_POWER_MEAN],
+        unit: [0],
+        field: 'default'
+      },
+      {
+        sources: ['data_lake'],
+        site: [PORT_SITE_ID],
+        site_type: [BUILDING_SITE_TYPE],
+        device: [INTERLINK_DEVICE_ID],
+        device_type: ['meter'],
+        metric_type: [GRID_ACTIVE_POWER],
+        unit: [0],
+        field: 'default'
+      }
     ]
   };
 }
 
-// PV power records * -1 (Temporary)
 function normalizePVPower(watts: number): number {
   return watts * -1;
 }
 
-function extractSamples(response: SeriesResponse, deviceId: number, metricType: number): Sample[] {
+function extractSamples(
+  response: SeriesResponse,
+  deviceId: number,
+  metricType: number
+): Sample[] {
   const samples: Sample[] = [];
   for (const series of response.series ?? []) {
-    if (Number(series.device) !== deviceId || Number(series.metric_type) !== metricType) continue;
+    if (Number(series.device) !== deviceId ||
+      Number(series.metric_type) !== metricType) continue;
+
     for (const record of series.records ?? []) {
-      const time = new Date(record[3]).getTime(), rawWatts = Number(record[4]);
+      const time = new Date(record[3]).getTime();
+      const rawWatts = Number(record[4]);
       if (!Number.isFinite(time) || !Number.isFinite(rawWatts)) continue;
-      const watts = deviceId === PV_DEVICE_ID ? normalizePVPower(rawWatts) : rawWatts;
+
+      const watts = deviceId === PV_DEVICE_ID
+        ? normalizePVPower(rawWatts)
+        : rawWatts;
       samples.push({ time, watts });
     }
   }
   return samples.sort((a, b) => a.time - b.time);
 }
 
-
-function selectSamples(samples: Sample[], timestamps: number[]): (number | null)[] {
+function selectSamples(
+  samples: Sample[],
+  timestamps: number[]
+): (number | null)[] {
   const sorted = [...samples].sort((a, b) => a.time - b.time);
   const readings = [...new Map(sorted.map(sample => [sample.time, sample])).values()];
   const MAX_GAP_MS = 5 * 60_000;
@@ -70,20 +125,39 @@ function selectSamples(samples: Sample[], timestamps: number[]): (number | null)
     if (gap <= 0 || gap > MAX_GAP_MS) return null;
 
     const ratio = (time - previous.time) / gap;
-    return (previous.watts + (next.watts - previous.watts) * ratio) / 1000;
+    return (
+      previous.watts + (next.watts - previous.watts) * ratio
+    ) / 1000;
   });
 }
 
-
-function createLineGradient(context: ScriptableContext<'line'>, rgb: string): CanvasGradient | string {
-  const { chart } = context, { ctx, chartArea, scales } = chart;
+function createLineGradient(
+  context: ScriptableContext<'line'>,
+  rgb: string
+): CanvasGradient | string {
+  const { chart } = context;
+  const { ctx, chartArea, scales } = chart;
   if (!chartArea || !scales.y) return `rgba(${rgb}, 0.08)`;
+
   const points = chart.data.datasets[context.datasetIndex]?.data ?? [];
-  let sum = 0, count = 0;
-  for (const point of points) if (typeof point === 'number' && Number.isFinite(point)) { sum += point; count++; }
+  let sum = 0;
+  let count = 0;
+
+  for (const point of points) {
+    if (typeof point === 'number' && Number.isFinite(point)) {
+      sum += point;
+      count++;
+    }
+  }
   if (!count) return `rgba(${rgb}, 0.08)`;
-  const from = scales.y.getPixelForValue(sum / count), to = scales.y.getPixelForValue(0);
-  if (!Number.isFinite(from) || !Number.isFinite(to) || Math.abs(from - to) < 1) return `rgba(${rgb}, 0.08)`;
+
+  const from = scales.y.getPixelForValue(sum / count);
+  const to = scales.y.getPixelForValue(0);
+
+  if (!Number.isFinite(from) || !Number.isFinite(to) ||
+    Math.abs(from - to) < 1)
+    return `rgba(${rgb}, 0.08)`;
+
   const gradient = ctx.createLinearGradient(0, from, 0, to);
   gradient.addColorStop(0, `rgba(${rgb}, 0.16)`);
   gradient.addColorStop(1, `rgba(${rgb}, 0.01)`);
@@ -98,101 +172,225 @@ export default function PVChart({ timePeriod }: PVChartProps) {
 
   useEffect(() => {
     const controller = new AbortController();
+    let inFlight = false;
+    let firstLoad = true;
+
+    // New time period: previous data must not remain visible.
+    setResponseData(null);
+    setLoading(true);
+    setError(null);
+
     async function loadData() {
-      setLoading(true); setError(null); setResponseData(null);
-      const token = authService.getToken(), tokenType = authService.getTokenType();
-      if (!token) { authService.logout(); router.replace('/login'); return; }
+      if (inFlight || controller.signal.aborted) return;
+      inFlight = true;
+
+      const token = authService.getToken();
+      const tokenType = authService.getTokenType();
+
+      if (!token) {
+        inFlight = false;
+        authService.logout();
+        router.replace('/login');
+        return;
+      }
+
       try {
         const response = await fetch(`${BACKEND_URL}/api/series/data_lake`, {
           method: 'POST',
-          headers: { Accept: 'application/json', Authorization: `${tokenType} ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildPayload(timePeriod)), signal: controller.signal, cache: 'no-store'
+          headers: {
+            Accept: 'application/json',
+            Authorization: `${tokenType} ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(buildPayload(timePeriod)),
+          signal: controller.signal,
+          cache: 'no-store'
         });
+
         if (controller.signal.aborted) return;
-        if (response.status === 401) { authService.logout(); router.replace('/login'); return; }
-        if (!response.ok) throw new Error(`PV / Interlink API ${response.status}`);
+        if (response.status === 401) {
+          authService.logout();
+          router.replace('/login');
+          return;
+        }
+        if (!response.ok)
+          throw new Error(`PV / Interlink API ${response.status}`);
+
         const result = await response.json() as SeriesResponse;
-        if (!controller.signal.aborted) setResponseData(result);
+        if (controller.signal.aborted) return;
+
+        setResponseData(result);
+        firstLoad = false;
+        setError(null);
       } catch (err) {
-        if (!controller.signal.aborted) setError(err instanceof Error ? err.message : 'Failed to load PV and Interlink data');
+        if (controller.signal.aborted) return;
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load PV and Interlink data'
+        );
+        if (firstLoad) setResponseData(null);
       } finally {
+        inFlight = false;
         if (!controller.signal.aborted) setLoading(false);
       }
     }
+
     void loadData();
-    return () => controller.abort();
+    const interval = window.setInterval(
+      () => void loadData(),
+      REFRESH_INTERVAL_MS
+    );
+
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
   }, [timePeriod, router]);
 
   const chartData = useMemo(() => {
     const empty = { labels: [] as Date[], datasets: [] };
     if (!responseData?.series?.length) return empty;
-    const pvSamples = extractSamples(responseData, PV_DEVICE_ID, PV_POWER_MEAN);
-    const interlinkSamples = extractSamples(responseData, INTERLINK_DEVICE_ID, GRID_ACTIVE_POWER);
+
+    const pvSamples = extractSamples(
+      responseData, PV_DEVICE_ID, PV_POWER_MEAN
+    );
+    const interlinkSamples = extractSamples(
+      responseData, INTERLINK_DEVICE_ID, GRID_ACTIVE_POWER
+    );
+
     let latestTime = -Infinity;
-    for (const sample of pvSamples) if (sample.time > latestTime) latestTime = sample.time;
-    for (const sample of interlinkSamples) if (sample.time > latestTime) latestTime = sample.time;
+    for (const sample of pvSamples) {
+      if (sample.time > latestTime) latestTime = sample.time;
+    }
+    for (const sample of interlinkSamples) {
+      if (sample.time > latestTime) latestTime = sample.time;
+    }
     if (!Number.isFinite(latestTime)) return empty;
 
+    const minuteMs = 60_000;
     const stepMs = getChartStepMs(timePeriod);
-    const end = Math.floor(latestTime / stepMs) * stepMs;
-    const start = end - getTimePeriodMinutes(timePeriod) * 60_000;
-    const timestamps: number[] = [];
-    for (let time = start; time <= end; time += stepMs) timestamps.push(time);
+    const minutesPerPoint = stepMs / minuteMs;
+    const end = Math.floor(latestTime / minuteMs) * minuteMs;
+    const start = timePeriod === 'today'
+      ? getTodayStartMs()
+      : end - getTimePeriodMinutes(timePeriod) * minuteMs;
+
+    if (start > end) return empty;
+
+    const minuteTimestamps: number[] = [];
+    for (let time = start + minuteMs; time <= end; time += minuteMs) {
+      minuteTimestamps.push(time);
+    }
+    if (!minuteTimestamps.length) return empty;
+
+    const displayTimestamps = minuteTimestamps.filter((_, index) =>
+      (index + 1) % minutesPerPoint === 0 ||
+      index === minuteTimestamps.length - 1
+    );
+
+    const pvMinuteData = selectSamples(pvSamples, minuteTimestamps);
+    const interlinkMinuteData = selectSamples(interlinkSamples, minuteTimestamps);
 
     return {
-      labels: timestamps.map(time => new Date(time)),
+      labels: displayTimestamps.map(time => new Date(time)),
       datasets: [
         {
-          label: 'PV', data: selectSamples(pvSamples, timestamps),
+          label: 'PV',
+          data: aggregateMinuteValues(pvMinuteData, stepMs),
           borderColor: PV_COLOR,
-          backgroundColor: (ctx: ScriptableContext<'line'>) => createLineGradient(ctx, '251, 205, 74'),
-          borderWidth: 2, pointRadius: 0, pointHoverRadius: 5,
-          pointHoverBackgroundColor: PV_COLOR, pointHoverBorderColor: '#fff',
-          pointHoverBorderWidth: 2, tension: 0, fill: 'origin' as const, spanGaps: false
+          backgroundColor: (ctx: ScriptableContext<'line'>) =>
+            createLineGradient(ctx, '251, 205, 74'),
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 5,
+          pointHoverBackgroundColor: PV_COLOR,
+          pointHoverBorderColor: '#fff',
+          pointHoverBorderWidth: 2,
+          tension: 0,
+          fill: 'origin' as const,
+          spanGaps: false
         },
         {
-          label: 'Interlink', data: selectSamples(interlinkSamples, timestamps),
+          label: 'Interlink',
+          data: aggregateMinuteValues(interlinkMinuteData, stepMs),
           borderColor: INTERLINK_COLOR,
-          backgroundColor: (ctx: ScriptableContext<'line'>) => createLineGradient(ctx, '37, 99, 235'),
-          borderWidth: 2, pointRadius: 0, pointHoverRadius: 5,
-          pointHoverBackgroundColor: INTERLINK_COLOR, pointHoverBorderColor: '#fff',
-          pointHoverBorderWidth: 2, tension: 0, fill: 'origin' as const, spanGaps: false
+          backgroundColor: (ctx: ScriptableContext<'line'>) =>
+            createLineGradient(ctx, '37, 99, 235'),
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 5,
+          pointHoverBackgroundColor: INTERLINK_COLOR,
+          pointHoverBorderColor: '#fff',
+          pointHoverBorderWidth: 2,
+          tension: 0,
+          fill: 'origin' as const,
+          spanGaps: false
         }
       ]
     };
   }, [responseData, timePeriod]);
 
   const chartOptions = useMemo<ChartOptions<'line'>>(() => ({
-    responsive: true, maintainAspectRatio: false, animation: false,
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: {
-        display: true, position: 'bottom',
+        display: true,
+        position: 'bottom',
         labels: {
-          boxWidth: 12, boxHeight: 12, padding: 20, usePointStyle: true,
-          pointStyle: 'circle', font: { size: 12 },
-          generateLabels: chart => ChartJS.defaults.plugins.legend.labels.generateLabels(chart).map(label => ({
-            ...label, fillStyle: chart.data.datasets[label.datasetIndex]?.borderColor as string
-          }))
+          boxWidth: 12,
+          boxHeight: 12,
+          padding: 20,
+          usePointStyle: true,
+          pointStyle: 'circle',
+          font: { size: 12 },
+          generateLabels: chart =>
+            ChartJS.defaults.plugins.legend.labels.generateLabels(chart).map(label => ({
+              ...label,
+              fillStyle: chart.data.datasets[label.datasetIndex]?.borderColor as string
+            }))
         }
       },
       tooltip: {
-        enabled: true, mode: 'index', intersect: false, position: 'nearest',
-        backgroundColor: 'rgba(17, 24, 39, 0.97)', titleColor: '#fff',
-        bodyColor: '#e5e7eb', borderColor: 'rgba(59, 130, 246, 0.5)',
-        borderWidth: 1, padding: 12, displayColors: true, boxWidth: 10,
-        boxHeight: 10, usePointStyle: true, bodySpacing: 5,
+        enabled: true,
+        mode: 'index',
+        intersect: false,
+        position: 'nearest',
+        backgroundColor: 'rgba(17, 24, 39, 0.97)',
+        titleColor: '#fff',
+        bodyColor: '#e5e7eb',
+        borderColor: 'rgba(59, 130, 246, 0.5)',
+        borderWidth: 1,
+        padding: 12,
+        displayColors: true,
+        boxWidth: 10,
+        boxHeight: 10,
+        usePointStyle: true,
+        bodySpacing: 5,
         titleFont: { size: 13, weight: 'bold' },
-        bodyFont: { size: 11 }, footerFont: { size: 12, weight: 'bold' },
+        bodyFont: { size: 11 },
+        footerFont: { size: 12, weight: 'bold' },
         callbacks: {
-          title: items => !items.length ? '' : new Date(items[0].parsed.x).toLocaleTimeString('en-GB', {
-            hour: '2-digit', minute: '2-digit', hour12: false
-          }),
+          title: items => !items.length ? '' :
+            new Date(items[0].parsed.x).toLocaleTimeString('en-GB', {
+              timeZone: 'Atlantic/Madeira',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            }),
           label: context => {
             const value = context.parsed.y;
-            return value === null ? '' : `${context.dataset.label}: ${value.toFixed(2)} kW`;
+            return value === null
+              ? ''
+              : `${context.dataset.label}: ${value.toFixed(2)} kW`;
           },
-          footer: items => `Total: ${items.reduce((sum, item) => sum + (item.parsed.y ?? 0), 0).toFixed(2)} kW`
+          footer: items =>
+            `Total: ${items.reduce(
+              (sum, item) => sum + (item.parsed.y ?? 0), 0
+            ).toFixed(2)} kW`
         }
       },
       filler: { propagate: false },
@@ -200,46 +398,74 @@ export default function PVChart({ timePeriod }: PVChartProps) {
     },
     scales: {
       x: {
-        type: 'time', stacked: false,
+        type: 'time',
+        stacked: false,
+        offset: true,
+        min: timePeriod === 'today' ? getTodayStartMs() : undefined,
         time: {
-          unit: timePeriod === '6hours' ? 'hour' : 'minute',
+          unit: timePeriod === '1hour' || timePeriod === '3hours'
+            ? 'minute'
+            : 'hour',
           displayFormats: { minute: 'HH:mm', hour: 'HH:mm' },
-          tooltipFormat: 'HH:mm', minUnit: 'minute'
+          tooltipFormat: 'HH:mm',
+          minUnit: 'minute'
         },
         grid: { display: false },
-        ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8, color: '#6b7280', font: { size: 11 } },
+        ticks: {
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 8,
+          color: '#6b7280',
+          font: { size: 11 }
+        },
         border: { display: false }
       },
       y: {
-        stacked: false, beginAtZero: false,
+        stacked: false,
+        beginAtZero: false,
         grid: { color: 'rgba(0, 0, 0, 0.08)' },
-        ticks: { callback: value => `${value} kW`, color: '#6b7280', padding: 8, font: { size: 11 } },
+        ticks: {
+          callback: value => `${value} kW`,
+          color: '#6b7280',
+          padding: 8,
+          font: { size: 11 }
+        },
         border: { display: false }
       }
     },
     elements: { line: { tension: 0 } }
   }), [timePeriod]);
 
-  const hasData = chartData.datasets.some(dataset => dataset.data.some(value => value !== null));
+  const hasData = chartData.datasets.some(dataset =>
+    dataset.data.some(value => value !== null)
+  );
 
   return (
     <div className="mt-6 rounded-xl border border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 p-6 shadow-lg dark:border-gray-700 dark:from-gray-800 dark:to-gray-900">
       <div className="mb-4 flex items-center gap-2">
         <SolarPanel className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-        <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200">PV &amp; Grid Interlink</h3>
+        <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200">
+          PV &amp; Grid Interlink
+        </h3>
       </div>
       <div className="h-96">
         {loading ? (
           <div className="flex h-full items-center justify-center gap-2">
             <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-500" />
-            <span className="text-gray-500 dark:text-gray-400">Loading data...</span>
+            <span className="text-gray-500 dark:text-gray-400">
+              Loading data...
+            </span>
           </div>
-        ) : error ? (
-          <div className="flex h-full items-center justify-center text-red-500">{error}</div>
+        ) : error && !responseData ? (
+          <div className="flex h-full items-center justify-center text-red-500">
+            {error}
+          </div>
         ) : hasData ? (
           <Line data={chartData} options={chartOptions} />
         ) : (
-          <div className="flex h-full items-center justify-center text-gray-500 dark:text-gray-400">No data available</div>
+          <div className="flex h-full items-center justify-center text-gray-500 dark:text-gray-400">
+            No data available
+          </div>
         )}
       </div>
     </div>

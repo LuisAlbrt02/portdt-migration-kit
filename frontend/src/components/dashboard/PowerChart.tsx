@@ -3,22 +3,45 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity } from 'lucide-react';
 import { Line } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, TimeScale, Tooltip, Legend, Filler, type ChartOptions } from 'chart.js';
+import {
+  Chart as ChartJS, CategoryScale, LinearScale, PointElement,
+  LineElement, TimeScale, Tooltip, Legend, Filler, type ChartOptions
+} from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { useTranslation } from '../../hooks/useTranslation';
 import { EE_TAG_ID } from '../../types/EnergyData';
-import { type TimePeriod, getChartStepMs, getTimePeriodMinutes } from './TimeSelector';
+import {
+  type TimePeriod, getChartStepMs, getTimePeriodMinutes,
+  getTodayStartMs, aggregateMinuteValues
+} from './TimeSelector';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, TimeScale, Tooltip, Legend, Filler);
 
-export interface ChartMeter { id: number; name: string; tags: number[]; extra?: string | { friendlyName?: string } | null; }
-export interface ChartSeriesItem { device: number; metric_type: number; records: [number, number, number, string, number][]; }
-export interface ChartSeriesResponse { series: ChartSeriesItem[]; }
-interface PowerChartProps { meters: ChartMeter[]; periodData: ChartSeriesResponse | null; timePeriod: TimePeriod; loading: boolean; }
+export interface ChartMeter {
+  id: number;
+  name: string;
+  tags: number[];
+  extra?: string | { friendlyName?: string } | null;
+}
+export interface ChartSeriesItem {
+  device: number;
+  metric_type: number;
+  records: [number, number, number, string, number][];
+}
+export interface ChartSeriesResponse {
+  start_dtm?: string | null;
+  end_dtm?: string | null;
+  series: ChartSeriesItem[];
+}
+interface PowerChartProps {
+  meters: ChartMeter[];
+  periodData: ChartSeriesResponse | null;
+  timePeriod: TimePeriod;
+  loading: boolean;
+}
 type Sample = { time: number; watts: number };
 
 const PHASE_METRICS = [6, 7, 8];
-const MAX_GAP_MS = 5 * 60_000;
 const COLORS = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899',
   '#06b6d4', '#fb923c', '#84cc16', '#14b8a6', '#eab308', '#a855f7',
@@ -30,24 +53,34 @@ function getMeterName(meter?: ChartMeter, id?: number): string {
   if (meter.extra) {
     try {
       const extra = typeof meter.extra === 'string' ? JSON.parse(meter.extra) : meter.extra;
-      if (typeof extra?.friendlyName === 'string' && extra.friendlyName.trim()) return extra.friendlyName.trim();
+      if (typeof extra?.friendlyName === 'string' && extra.friendlyName.trim())
+        return extra.friendlyName.trim();
     } catch {}
   }
   return meter.name || `Device ${meter.id}`;
 }
 
+function getMeterDisplayName(meter?: ChartMeter, id?: number): string {
+  if (!meter) return id !== undefined ? `Device ${id}` : 'Unknown device';
+  const friendlyName = getMeterName(meter);
+  return friendlyName !== meter.name
+    ? `${meter.name} • ${friendlyName}`
+    : meter.name;
+}
+
 function getDeviceColor(name: string) {
   let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  for (let i = 0; i < name.length; i++)
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
   const border = COLORS[Math.abs(hash) % COLORS.length];
   return { border, bg: `${border}cc` };
 }
 
-
 function interpolateSamples(samples: Sample[], timestamps: number[]): (number | null)[] {
   const sorted = [...samples].sort((a, b) => a.time - b.time);
   const readings = [...new Map(sorted.map(sample => [sample.time, sample])).values()];
-  const MAX_GAP_MS = 5 * 60_000, MAX_FORWARD_FILL_MS = 2 * 60_000;
+  const MAX_GAP_MS = 5 * 60_000;
+  const MAX_FORWARD_FILL_MS = 2 * 60_000;
   let index = 0;
 
   return timestamps.map(time => {
@@ -57,26 +90,33 @@ function interpolateSamples(samples: Sample[], timestamps: number[]): (number | 
 
     const previous = readings[index - 1];
     if (!previous) return null;
-
     if (!next) {
       const elapsed = time - previous.time;
-      return elapsed >= 0 && elapsed < MAX_FORWARD_FILL_MS ? previous.watts / 1000 : null;
+      return elapsed >= 0 && elapsed < MAX_FORWARD_FILL_MS
+        ? previous.watts / 1000
+        : null;
     }
 
     const gap = next.time - previous.time;
     if (gap <= 0 || gap > MAX_GAP_MS) return null;
-
-    return (previous.watts + (next.watts - previous.watts) * (time - previous.time) / gap) / 1000;
+    return (
+      previous.watts + (next.watts - previous.watts) * (time - previous.time) / gap
+    ) / 1000;
   });
 }
 
-
-export default function PowerChart({ meters, periodData, timePeriod, loading }: PowerChartProps) {
+export default function PowerChart({
+  meters, periodData, timePeriod, loading
+}: PowerChartProps) {
   const t = useTranslation();
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const initialized = useRef(false);
   const selectRef = useRef<HTMLDetailsElement>(null);
-  const eeDeviceId = useMemo(() => meters.find(m => m.tags?.includes(EE_TAG_ID))?.id, [meters]);
+
+  const eeDeviceId = useMemo(
+    () => meters.find(m => m.tags?.includes(EE_TAG_ID))?.id,
+    [meters]
+  );
 
   const availableMeters = useMemo(() => {
     if (!periodData?.series?.length) return [];
@@ -99,107 +139,205 @@ export default function PowerChart({ meters, periodData, timePeriod, loading }: 
 
   useEffect(() => {
     const close = (event: PointerEvent) => {
-      if (selectRef.current && !selectRef.current.contains(event.target as Node)) selectRef.current.open = false;
+      if (selectRef.current && !selectRef.current.contains(event.target as Node))
+        selectRef.current.open = false;
     };
     document.addEventListener('pointerdown', close);
     return () => document.removeEventListener('pointerdown', close);
   }, []);
 
   const toggleMeter = (id: number) => setSelectedIds(current =>
-    current.includes(id) ? current.filter(value => value !== id) : [...current, id]
+    current.includes(id)
+      ? current.filter(value => value !== id)
+      : [...current, id]
   );
 
   const chartData = useMemo(() => {
     const empty = { labels: [] as Date[], datasets: [] };
-    if (!periodData?.series?.length || !selectedIds.length || eeDeviceId === undefined) return empty;
+    if (!periodData?.series?.length || !selectedIds.length || eeDeviceId === undefined)
+      return empty;
+
     const selected = new Set(selectedIds);
     const devices = new Map<number, Map<number, Sample[]>>();
     let latestTime = -Infinity;
 
+    // Find the latest available time from all device power records.
+    // The selected devices must not change the time window.
     for (const series of periodData.series) {
-      const deviceId = Number(series.device), phase = Number(series.metric_type);
-      if (deviceId === eeDeviceId || !selected.has(deviceId) || !PHASE_METRICS.includes(phase)) continue;
-      if (!devices.has(deviceId)) devices.set(deviceId, new Map());
-      const phases = devices.get(deviceId)!;
-      if (!phases.has(phase)) phases.set(phase, []);
+      const deviceId = Number(series.device);
+      const phase = Number(series.metric_type);
+      if (deviceId === eeDeviceId || !PHASE_METRICS.includes(phase)) continue;
+
+      if (selected.has(deviceId)) {
+        if (!devices.has(deviceId)) devices.set(deviceId, new Map());
+        const phases = devices.get(deviceId)!;
+        if (!phases.has(phase)) phases.set(phase, []);
+      }
+
       for (const record of series.records ?? []) {
-        const time = new Date(record[3]).getTime(), watts = Number(record[4]);
+        const time = new Date(record[3]).getTime();
+        const watts = Number(record[4]);
         if (!Number.isFinite(time) || !Number.isFinite(watts)) continue;
-        phases.get(phase)!.push({ time, watts });
         if (time > latestTime) latestTime = time;
+
+        if (selected.has(deviceId)) {
+          devices.get(deviceId)!.get(phase)!.push({ time, watts });
+        }
       }
     }
+
     if (!Number.isFinite(latestTime)) return empty;
 
+    const minuteMs = 60_000;
     const stepMs = getChartStepMs(timePeriod);
-    const end = Math.floor(latestTime / stepMs) * stepMs;
-    const start = end - getTimePeriodMinutes(timePeriod) * 60_000;
-    const timestamps: number[] = [];
-    for (let time = start; time <= end; time += stepMs) timestamps.push(time);
+    const minutesPerPoint = stepMs / minuteMs;
+    const end = Math.floor(latestTime / minuteMs) * minuteMs;
+    const start = timePeriod === 'today'
+      ? getTodayStartMs()
+      : end - getTimePeriodMinutes(timePeriod) * minuteMs;
 
-    const datasets = [...devices.entries()].sort(([a], [b]) => a - b).map(([deviceId, phases]) => {
-      const name = getMeterName(meters.find(m => m.id === deviceId), deviceId);
-      const color = getDeviceColor(name);
-      const phaseData = [...phases.values()].map(samples => interpolateSamples(samples, timestamps));
-      const data = timestamps.map((_, index) => {
-        const values = phaseData.map(phase => phase[index]);
-        if (!values.length || values.some(value => value === null || value === undefined)) return null;
-        return Math.max(0, values.reduce<number>((sum, value) => sum + (value ?? 0), 0));
+    if (start > end) return empty;
+
+    const minuteTimestamps: number[] = [];
+    // Each timestamp represents the corresponding one-minute reading.
+    for (let time = start + minuteMs; time <= end; time += minuteMs) {
+      minuteTimestamps.push(time);
+    }
+    if (!minuteTimestamps.length) return empty;
+
+    // One label for every complete interval, plus its final partial interval.
+    const displayTimestamps = minuteTimestamps.filter((_, index) =>
+      (index + 1) % minutesPerPoint === 0 ||
+      index === minuteTimestamps.length - 1
+    );
+
+    const datasets = [...devices.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([deviceId, phases]) => {
+        const name = getMeterName(meters.find(m => m.id === deviceId), deviceId);
+        const color = getDeviceColor(name);
+        const phaseData = [...phases.values()].map(samples =>
+          interpolateSamples(samples, minuteTimestamps)
+        );
+
+        // Sum all phases first, then aggregate the device power.
+        const minutePower = minuteTimestamps.map((_, index) => {
+          const values = phaseData.map(phase => phase[index]);
+          if (!values.length ||
+            values.some(value => value === null || value === undefined))
+            return null;
+          return Math.max(
+            0,
+            values.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+          );
+        });
+
+        return {
+          label: name,
+          data: aggregateMinuteValues(minutePower, stepMs),
+          backgroundColor: color.bg,
+          borderColor: color.border,
+          borderWidth: 1.5,
+          fill: true,
+          tension: 0,
+          pointRadius: 0,
+          pointHoverRadius: 5,
+          pointHoverBackgroundColor: color.border,
+          pointHoverBorderColor: '#fff',
+          pointHoverBorderWidth: 2,
+          spanGaps: false
+        };
       });
-      return {
-        label: name, data, backgroundColor: color.bg, borderColor: color.border,
-        borderWidth: 1.5, fill: true, tension: 0, pointRadius: 0, pointHoverRadius: 5,
-        pointHoverBackgroundColor: color.border, pointHoverBorderColor: '#fff',
-        pointHoverBorderWidth: 2, spanGaps: false
-      };
-    });
 
-    return { labels: timestamps.map(time => new Date(time)), datasets };
+    return {
+      labels: displayTimestamps.map(time => new Date(time)),
+      datasets
+    };
   }, [periodData, selectedIds, eeDeviceId, timePeriod, meters]);
 
   const chartOptions = useMemo<ChartOptions<'line'>>(() => ({
-    responsive: true, maintainAspectRatio: false, animation: false,
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: {
-        display: true, position: 'bottom',
-        labels: { boxWidth: 10, padding: 6, usePointStyle: true, pointStyle: 'circle', font: { size: 9 } }
+        display: true,
+        position: 'bottom',
+        labels: {
+          boxWidth: 10,
+          padding: 6,
+          usePointStyle: true,
+          pointStyle: 'circle',
+          font: { size: 9 }
+        }
       },
       tooltip: {
-        enabled: true, mode: 'index', intersect: false, position: 'nearest',
-        backgroundColor: 'rgba(17, 24, 39, 0.97)', titleColor: '#fff',
-        bodyColor: '#e5e7eb', borderColor: 'rgba(59, 130, 246, 0.5)',
-        borderWidth: 1, padding: 12, displayColors: true, boxWidth: 10,
-        boxHeight: 10, usePointStyle: true, bodySpacing: 5,
+        enabled: true,
+        mode: 'index',
+        intersect: false,
+        position: 'nearest',
+        backgroundColor: 'rgba(17, 24, 39, 0.97)',
+        titleColor: '#fff',
+        bodyColor: '#e5e7eb',
+        borderColor: 'rgba(59, 130, 246, 0.5)',
+        borderWidth: 1,
+        padding: 12,
+        displayColors: true,
+        boxWidth: 10,
+        boxHeight: 10,
+        usePointStyle: true,
+        bodySpacing: 5,
         titleFont: { size: 13, weight: 'bold' },
-        bodyFont: { size: 11 }, footerFont: { size: 12, weight: 'bold' },
+        bodyFont: { size: 11 },
+        footerFont: { size: 12, weight: 'bold' },
         callbacks: {
-          title: items => !items.length ? '' : new Date(items[0].parsed.x).toLocaleTimeString('en-GB', {
-            hour: '2-digit', minute: '2-digit', hour12: false
-          }),
+          title: items => !items.length ? '' :
+            new Date(items[0].parsed.x).toLocaleTimeString('en-GB', {
+              timeZone: 'Atlantic/Madeira',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            }),
           beforeBody: items => {
-            const count = items.filter(item => item.parsed.y !== null && item.parsed.y >= 0.1).length;
-            return count > 10 ? [`📊 ${count} active devices - Top 10 shown`] : [];
+            const count = items.filter(
+              item => item.parsed.y !== null && item.parsed.y >= 0.1
+            ).length;
+            return count > 10
+              ? [`📊 ${count} active devices - Top 10 shown`]
+              : [];
           },
           label: context => {
             const value = context.parsed.y;
             if (value === null || value < 0.1) return '';
             const all = context.chart.tooltip?.dataPoints ?? [];
-            const sorted = [...all].filter(item => item.parsed.y !== null && item.parsed.y >= 0.1)
+            const sorted = [...all]
+              .filter(item => item.parsed.y !== null && item.parsed.y >= 0.1)
               .sort((a, b) => b.parsed.y - a.parsed.y);
-            const index = sorted.findIndex(item => item.datasetIndex === context.datasetIndex);
-            return index >= 10 ? '' : `${context.dataset.label}: ${value.toFixed(2)} ${t.kW}`;
+            const index = sorted.findIndex(
+              item => item.datasetIndex === context.datasetIndex
+            );
+            return index >= 10
+              ? ''
+              : `${context.dataset.label}: ${value.toFixed(2)} ${t.kW}`;
           },
           afterBody: items => {
-            const sorted = [...items].filter(item => item.parsed.y !== null && item.parsed.y >= 0.1)
+            const sorted = [...items]
+              .filter(item => item.parsed.y !== null && item.parsed.y >= 0.1)
               .sort((a, b) => b.parsed.y - a.parsed.y);
             if (sorted.length <= 10) return [];
             const others = sorted.slice(10);
-            const power = others.reduce((sum, item) => sum + item.parsed.y, 0);
-            return [`+ ${others.length} other devices: ${power.toFixed(2)} ${t.kW}`];
+            const power = others.reduce(
+              (sum, item) => sum + item.parsed.y, 0
+            );
+            return [
+              `+ ${others.length} other devices: ${power.toFixed(2)} ${t.kW}`
+            ];
           },
           footer: items => {
-            const total = items.reduce((sum, item) => sum + (item.parsed.y ?? 0), 0);
+            const total = items.reduce(
+              (sum, item) => sum + (item.parsed.y ?? 0), 0
+            );
             return `Total: ${total.toFixed(2)} ${t.kW}`;
           }
         }
@@ -209,22 +347,38 @@ export default function PowerChart({ meters, periodData, timePeriod, loading }: 
     },
     scales: {
       x: {
-        type: 'time', stacked: false,
+        type: 'time',
+        stacked: false,
+        offset: true,
+        min: timePeriod === 'today' ? getTodayStartMs() : undefined,
         time: {
-          unit: timePeriod === '6hours' ? 'hour' : 'minute',
+          unit: timePeriod === '1hour' || timePeriod === '3hours'
+            ? 'minute'
+            : 'hour',
           displayFormats: { minute: 'HH:mm', hour: 'HH:mm' },
-          tooltipFormat: 'HH:mm', minUnit: 'minute'
+          tooltipFormat: 'HH:mm',
+          minUnit: 'minute'
         },
         grid: { display: false },
-        ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8, color: '#6b7280', font: { size: 11 } },
+        ticks: {
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 8,
+          color: '#6b7280',
+          font: { size: 11 }
+        },
         border: { display: false }
       },
       y: {
-        stacked: true, beginAtZero: true, suggestedMin: 0,
+        stacked: true,
+        beginAtZero: true,
+        suggestedMin: 0,
         grid: { color: 'rgba(0, 0, 0, 0.08)' },
         ticks: {
           callback: value => Number(value) < 0 ? '' : `${value} kW`,
-          color: '#6b7280', padding: 8, font: { size: 11 }
+          color: '#6b7280',
+          padding: 8,
+          font: { size: 11 }
         },
         border: { display: false }
       }
@@ -232,16 +386,27 @@ export default function PowerChart({ meters, periodData, timePeriod, loading }: 
     elements: { line: { tension: 0 } }
   }), [timePeriod, t.kW]);
 
-  const selectedLabel = !selectedIds.length ? t.selectDevices :
-    selectedIds.length === 1 ? getMeterName(meters.find(m => m.id === selectedIds[0]), selectedIds[0]) :
-    `${selectedIds.length} ${t.devicesSelected}`;
+  const selectedLabel = !selectedIds.length
+    ? t.selectDevices
+    : selectedIds.length === 1
+      ? getMeterDisplayName(
+          meters.find(m => m.id === selectedIds[0]),
+          selectedIds[0]
+        )
+      : `${selectedIds.length} ${t.devicesSelected}`;
 
   const periodLabels: Record<TimePeriod, string> = {
-    '15min': t.last15Minutes, '30min': t.last30Minutes, '1hour': t.lastHour,
-    '3hours': t.last3Hours, '6hours': t.last6Hours
+    '1hour': t.lastHour,
+    '3hours': t.last3Hours,
+    '6hours': t.last6Hours,
+    '12hours': 'Last 12 Hours',
+    '24hours': 'Last 24 Hours',
+    'today': 'Today'
   };
 
-  const hasData = chartData.datasets.some(dataset => dataset.data.some(value => value !== null));
+  const hasData = chartData.datasets.some(dataset =>
+    dataset.data.some(value => value !== null)
+  );
 
   return (
     <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 p-6 shadow-lg dark:border-gray-700 dark:from-gray-800 dark:to-gray-900">
@@ -254,38 +419,61 @@ export default function PowerChart({ meters, periodData, timePeriod, loading }: 
           <summary className="flex min-w-[280px] cursor-pointer list-none items-center justify-between gap-3 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm hover:border-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 [&::-webkit-details-marker]:hidden">
             <span className="max-w-[230px] truncate">{selectedLabel}</span>
             <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M19 9l-7 7-7-7" />
             </svg>
           </summary>
           <div className="absolute right-0 z-50 mt-2 w-[340px] rounded-lg border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-600 dark:bg-gray-800">
             <div className="mb-2 flex items-center justify-between border-b border-gray-200 pb-2 dark:border-gray-700">
-              <button type="button" onClick={() => setSelectedIds(availableMeters.map(m => m.id))} className="text-sm font-medium text-blue-600 hover:text-blue-700">{t.selectAll}</button>
-              <button type="button" onClick={() => setSelectedIds([])} className="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400">{t.clear}</button>
+              <button type="button"
+                onClick={() => setSelectedIds(availableMeters.map(m => m.id))}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700">
+                {t.selectAll}
+              </button>
+              <button type="button"
+                onClick={() => setSelectedIds([])}
+                className="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400">
+                {t.clear}
+              </button>
             </div>
             <div className="max-h-64 space-y-1 overflow-y-auto">
               {availableMeters.map(meter => (
-                <label key={meter.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-700">
-                  <input type="checkbox" checked={selectedIds.includes(meter.id)} onChange={() => toggleMeter(meter.id)}
+                <label key={meter.id}
+                  className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-700">
+                  <input type="checkbox"
+                    checked={selectedIds.includes(meter.id)}
+                    onChange={() => toggleMeter(meter.id)}
                     className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                  <span className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{getMeterName(meter)}</span>
+                  <span
+                    className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200"
+                    title={getMeterDisplayName(meter)}>
+                    {getMeterDisplayName(meter)}
+                  </span>
                 </label>
               ))}
             </div>
           </div>
         </details>
       </div>
+
       <div className="h-96">
         {loading ? (
           <div className="flex h-full items-center justify-center gap-2">
             <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-500" />
-            <span className="text-gray-500 dark:text-gray-400">{t.loadingData}</span>
+            <span className="text-gray-500 dark:text-gray-400">
+              {t.loadingData}
+            </span>
           </div>
         ) : !selectedIds.length ? (
-          <div className="flex h-full items-center justify-center text-gray-500 dark:text-gray-400">{t.noDevicesSelected}</div>
+          <div className="flex h-full items-center justify-center text-gray-500 dark:text-gray-400">
+            {t.noDevicesSelected}
+          </div>
         ) : hasData ? (
           <Line data={chartData} options={chartOptions} />
         ) : (
-          <div className="flex h-full items-center justify-center text-gray-500 dark:text-gray-400">{t.noDataAvailable}</div>
+          <div className="flex h-full items-center justify-center text-gray-500 dark:text-gray-400">
+            {t.noDataAvailable}
+          </div>
         )}
       </div>
     </div>
