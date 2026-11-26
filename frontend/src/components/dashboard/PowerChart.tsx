@@ -39,7 +39,7 @@ export interface ChartSeriesResponse {
 
 export interface PowerChartMetrics { maxPower: number; topConsumerName: string; topConsumerPercentage: number; loading: boolean; error: string | null; }
 
-interface PowerChartProps { timePeriod: TimePeriod; onMetricsChange?: (metrics: PowerChartMetrics) => void; }
+interface PowerChartProps { timePeriod: TimePeriod; onMetricsChange?: (metrics: PowerChartMetrics) => void; onAnchorChange?: (period: TimePeriod, endMs: number | null) => void; }
 
 type Meter = ChartMeter;
 
@@ -238,7 +238,7 @@ function interpolateSamples(samples: Sample[], timestamps: number[]): (number | 
   });
 }
 
-export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartProps) {
+export default function PowerChart({ timePeriod, onMetricsChange, onAnchorChange }: PowerChartProps) {
   const t = useTranslation();
   const router = useRouter();
   const [meters, setMeters] = useState<ChartMeter[]>([]);
@@ -339,6 +339,13 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
   );
 
   const visiblePeriodData = requestPeriod === timePeriod ? periodData : null;
+
+  // Share the same time anchor with PVChart via PortEnergyOverview.
+  useEffect(() => {
+    const raw = visiblePeriodData?.end_dtm;
+    const end = raw ? new Date(raw).getTime() : NaN;
+    onAnchorChange?.(timePeriod, Number.isFinite(end) ? Math.floor(end / MINUTE_MS) * MINUTE_MS : null);
+  }, [timePeriod, visiblePeriodData?.end_dtm, onAnchorChange]);
 
   const availableMeters = useMemo(() => {
     if (!visiblePeriodData?.series?.length) return [];

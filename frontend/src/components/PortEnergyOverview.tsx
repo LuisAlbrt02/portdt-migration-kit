@@ -214,6 +214,10 @@ export default function PortEnergyOverview() {
   });
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('today');
+  const [powerAnchor, setPowerAnchor] = useState<{ period: TimePeriod; endMs: number | null } | null>(null);
+  const handlePowerAnchor = useCallback((period: TimePeriod, endMs: number | null) => {
+    setPowerAnchor(current => current?.period === period && current.endMs === endMs ? current : { period, endMs });
+  }, []);
   const [powerMetrics, setPowerMetrics] = useState<PowerChartMetrics>({
     maxPower: 0, topConsumerName: 'N/A', topConsumerPercentage: 0, loading: true, error: null
   });
@@ -449,7 +453,7 @@ export default function PortEnergyOverview() {
         onChange={setTimePeriod}
       />
       <div className="flex flex-col gap-4">
-      <PowerChart timePeriod={timePeriod} onMetricsChange={handlePowerMetrics} />
+      <PowerChart timePeriod={timePeriod} onMetricsChange={handlePowerMetrics} onAnchorChange={handlePowerAnchor} />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <MetricCard title={t.maxPowerLabel} value={powerMetrics.maxPower} unit={t.kW}
           icon={TrendingUp} variant="rose" loading={powerMetrics.loading} error={!!powerMetrics.error} />
@@ -459,7 +463,7 @@ export default function PortEnergyOverview() {
         <MetricCard title={t.monthlyEnergyLabel} value={monthlyEnergy.toLocaleString()} unit={t.kWh}
           icon={Zap} variant="indigo" loading={monthlyEnergyLoading} error={!!monthlyEnergyError} />
       </div>
-      <PVChart key={timePeriod} timePeriod={timePeriod} />
+      <PVChart key={timePeriod} timePeriod={timePeriod} anchorMs={powerAnchor?.period === timePeriod ? powerAnchor.endMs : null} />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
         <MetricCard title="Solar Generated Today"

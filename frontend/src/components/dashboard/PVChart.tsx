@@ -31,7 +31,7 @@ interface SeriesItem {
   records: SeriesRecord[];
 }
 interface SeriesResponse { series: SeriesItem[]; }
-interface PVChartProps { timePeriod: TimePeriod; }
+interface PVChartProps { timePeriod: TimePeriod; anchorMs?: number | null; }
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
 const DATA_DELAY_BUFFER_MINUTES = 30;
@@ -39,12 +39,12 @@ const REFRESH_INTERVAL_MS = 60_000;
 const PV_COLOR = '#eebb00';
 const INTERLINK_COLOR = '#2563eb';
 
-function buildPayload(period: TimePeriod) {
-  const end = new Date();
+function buildPayload(period: TimePeriod, anchorMs?: number | null) {
+  const end = new Date(anchorMs == null ? Date.now() : anchorMs + 5 * 60_000);
   const start = period === 'today'
-    ? new Date(getTodayStartMs())
+    ? new Date(getTodayStartMs() - 5 * 60_000)
     : new Date(
-        end.getTime() -
+        (anchorMs ?? Date.now()) -
         (getTimePeriodMinutes(period) + DATA_DELAY_BUFFER_MINUTES) * 60_000
       );
 
@@ -164,13 +164,14 @@ function createLineGradient(
   return gradient;
 }
 
-export default function PVChart({ timePeriod }: PVChartProps) {
+export default function PVChart({ timePeriod, anchorMs }: PVChartProps) {
   const router = useRouter();
   const [responseData, setResponseData] = useState<SeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (anchorMs === null) { setResponseData(null); setLoading(true); return; }
     const controller = new AbortController();
     let inFlight = false;
     let firstLoad = true;
@@ -202,7 +203,7 @@ export default function PVChart({ timePeriod }: PVChartProps) {
             Authorization: `${tokenType} ${token}`,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify(buildPayload(timePeriod)),
+          body: JSON.stringify(buildPayload(timePeriod, anchorMs)),
           signal: controller.signal,
           cache: 'no-store'
         });
@@ -246,7 +247,7 @@ export default function PVChart({ timePeriod }: PVChartProps) {
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [timePeriod, router]);
+  }, [timePeriod, router, anchorMs]);
 
   const chartData = useMemo(() => {
     const empty = { labels: [] as Date[], datasets: [] };
@@ -271,7 +272,7 @@ export default function PVChart({ timePeriod }: PVChartProps) {
     const minuteMs = 60_000;
     const stepMs = getChartStepMs(timePeriod);
     const minutesPerPoint = stepMs / minuteMs;
-    const end = Math.floor(latestTime / minuteMs) * minuteMs;
+    const end = Math.floor((anchorMs ?? latestTime) / minuteMs) * minuteMs;
     const start = timePeriod === 'today'
       ? getTodayStartMs()
       : end - getTimePeriodMinutes(timePeriod) * minuteMs;
@@ -279,7 +280,7 @@ export default function PVChart({ timePeriod }: PVChartProps) {
     if (start > end) return empty;
 
     const minuteTimestamps: number[] = [];
-    for (let time = start + minuteMs; time <= end; time += minuteMs) {
+    for (let time = start; time <= end; time += minuteMs) {
       minuteTimestamps.push(time);
     }
     if (!minuteTimestamps.length) return empty;
@@ -329,7 +330,19 @@ export default function PVChart({ timePeriod }: PVChartProps) {
         }
       ]
     };
-  }, [responseData, timePeriod]);
+  }, [responseData, timePeriod, anchorMs]);
+
+  const chartBounds = useMemo(() => {
+    if (timePeriod === 'today') {
+      const start = getTodayStartMs();
+      const tomorrow = new Date(start);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return { min: start, max: tomorrow.getTime() - 60_000 };
+    }
+    if (!chartData.labels.length) return { min: undefined, max: undefined };
+    const end = chartData.labels[chartData.labels.length - 1].getTime();
+    return { min: end - getTimePeriodMinutes(timePeriod) * 60_000, max: end };
+  }, [chartData.labels, timePeriod]);
 
   const chartOptions = useMemo<ChartOptions<'line'>>(() => ({
     responsive: true,
@@ -400,8 +413,10 @@ export default function PVChart({ timePeriod }: PVChartProps) {
       x: {
         type: 'time',
         stacked: false,
-        offset: true,
-        min: timePeriod === 'today' ? getTodayStartMs() : undefined,
+        offset: false,
+        bounds: 'data',
+        min: chartBounds.min,
+        max: chartBounds.max,
         time: {
           unit: timePeriod === '1hour' || timePeriod === '3hours'
             ? 'minute'
@@ -412,6 +427,7 @@ export default function PVChart({ timePeriod }: PVChartProps) {
         },
         grid: { display: false },
         ticks: {
+          source: 'data',
           maxRotation: 0,
           autoSkip: true,
           maxTicksLimit: 8,
@@ -425,6 +441,8 @@ export default function PVChart({ timePeriod }: PVChartProps) {
         beginAtZero: false,
         grid: { color: 'rgba(0, 0, 0, 0.08)' },
         ticks: {
+          stepSize: 2,
+          autoSkip: false,
           callback: value => `${value} kW`,
           color: '#6b7280',
           padding: 8,
@@ -434,7 +452,7 @@ export default function PVChart({ timePeriod }: PVChartProps) {
       }
     },
     elements: { line: { tension: 0 } }
-  }), [timePeriod]);
+  }), [timePeriod, chartBounds]);
 
   const hasData = chartData.datasets.some(dataset =>
     dataset.data.some(value => value !== null)
