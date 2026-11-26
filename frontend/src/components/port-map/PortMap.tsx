@@ -8,14 +8,15 @@ import { useRouter } from 'next/navigation';
 import { authService } from '../../lib/Auth';
 import type { EnergyData } from '../../types/EnergyData';
 import type { Boat, BoatListResponse, PortGeofence } from '../../types/Boat';
-
 import {
   BOAT_UI_REFRESH_MS, EE_TAG_ID, ENERGY_REFRESH_MS,
   FALLBACK_MAP_STYLE, INITIAL_VIEW_STATE, MAP_HISTORY_HOURS,
   MAP_STYLE, PORT_VIEW_STATE,
 } from '../../config/portMap';
-
-import { QUAY_ZONES, getQuayDisplayPositions, type QuayZone, } from '../../config/quayZones';
+import {
+  QUAY_ZONES, getQuayDisplayPositions,
+  type QuayZone,
+} from '../../config/quayZones';
 import { add3DBuildings } from './BuildingsLayer';
 import { createBoatLayers, type BoatMapItem, type BoatStatus } from './BoatLayer';
 import { createGeofenceLayer } from './GeofenceLayer';
@@ -29,6 +30,7 @@ const LONGITUDE_METRIC = 66;
 const MAX_COORDINATE_SKEW_MS = 120_000;
 const MAX_INTERPOLATION_GAP_MS = 5 * 60_000;
 const MAX_NEAREST_POSITION_MS = 2 * 60_000;
+const MAX_HISTORICAL_POSITION_AGE_MS = 10 * 60_000;
 const DOCKED_TIME_MS = 5 * 60_000;
 const BOAT_HISTORY_HOURS = 24;
 type InitialDataKey = 'meters' | 'energy' | 'boats' | 'history' | 'geofence';
@@ -414,7 +416,7 @@ function getHistoricalBoats(
         .sort((a, b) =>
           Math.abs(a.time - target) - Math.abs(b.time - target)
         )[0];
-      if (nearest && Math.abs(nearest.time - target) <= MAX_NEAREST_POSITION_MS) {
+      if (nearest && Math.abs(nearest.time - target) <= MAX_HISTORICAL_POSITION_AGE_MS) {
         latitude = nearest.latitude;
         longitude = nearest.longitude;
       }
@@ -599,10 +601,10 @@ export default function PortMap() {
         body: JSON.stringify(payload),
       });
       if (handle401(response.status)) return;
-      if (!response.ok) throw new Error(`Series API ${response.status}`);
+      if (!response.ok) throw new Error(`Series API ${response.status}: ${(await response.text()).slice(0, 500)}`);
       const responseData = await response.json() as SeriesResponse | SeriesItem[];
       const transformed = groupEnergyRecords(responseData, meters);
-      setEnergyData(transformed);
+      if (transformed.length) setEnergyData(transformed);
       markInitialData('energy', 'ready');
       if (isLiveMode && transformed.length) {
         const latest = Math.max(
@@ -668,9 +670,19 @@ export default function PortMap() {
         body: JSON.stringify(payload),
       });
       if (handle401(response.status)) return;
-      if (!response.ok) throw new Error(`Boat history API ${response.status}`);
+      if (!response.ok) throw new Error(`Boat history API ${response.status}: ${(await response.text()).slice(0, 500)}`);
       const data = await response.json() as SeriesResponse | SeriesItem[];
-      setBoatHistory(parseBoatHistory(data));
+      const incoming = parseBoatHistory(data);
+      if (incoming.length) {
+        setBoatHistory(previous => {
+          const merged = new Map<string, BoatPosition>();
+          const cutoff = Date.now() - BOAT_HISTORY_HOURS * 60 * 60 * 1000;
+          for (const item of [...previous, ...incoming]) {
+            if (item.time >= cutoff) merged.set(`${item.deviceId}:${item.time}`, item);
+          }
+          return [...merged.values()].sort((a, b) => a.time - b.time);
+        });
+      } else console.warn('[MAP] Boat history returned no GPS positions; preserving existing history.');
       markInitialData('history', 'ready');
     } catch (error) {
       console.error('Boat history request error:', error);
@@ -824,6 +836,16 @@ export default function PortMap() {
     [boatHistory, selectedTime, liveBoats, geofence]
   );
 
+  useEffect(() => {
+    if (isLiveMode) return;
+    console.debug('[MAP] Historical vessels', {
+      selectedTime: selectedTime.toISOString(),
+      historyPoints: boatHistory.length,
+      historicalBoats: historicalBoats.length,
+      firstPosition: boatHistory[0]?.timestamp,
+      lastPosition: boatHistory[boatHistory.length - 1]?.timestamp,
+    });
+  }, [isLiveMode, selectedTime, boatHistory, historicalBoats]);
   const displayedBoats = isLiveMode ? liveBoatsWithStatus : historicalBoats;
   const layers = useMemo(() => {
     const geofenceLayer = createGeofenceLayer(geofence);

@@ -1,7 +1,8 @@
-
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { authService } from '../../lib/Auth';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS, CategoryScale, LinearScale, PointElement,
@@ -9,14 +10,12 @@ import {
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { useTranslation } from '../../hooks/useTranslation';
-import { EE_TAG_ID } from '../../types/EnergyData';
+import { EE_TAG_ID, ACTIVE_POWER_UNIT, PORT_SITE_ID, PORT_PORT_TYPE } from '../../types/EnergyData';
 import {
   type TimePeriod, getChartStepMs, getTimePeriodMinutes,
   getTodayStartMs, aggregateMinuteValues
 } from './TimeSelector';
-
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, TimeScale, Tooltip, Legend, Filler);
-
 export interface ChartMeter {
   id: number;
   name: string;
@@ -33,21 +32,135 @@ export interface ChartSeriesResponse {
   end_dtm?: string | null;
   series: ChartSeriesItem[];
 }
-interface PowerChartProps {
-  meters: ChartMeter[];
-  periodData: ChartSeriesResponse | null;
-  timePeriod: TimePeriod;
-  loading: boolean;
+export interface PowerChartMetrics { maxPower: number; topConsumerName: string; topConsumerPercentage: number; loading: boolean; error: string | null; }
+interface PowerChartProps { timePeriod: TimePeriod; onMetricsChange?: (metrics: PowerChartMetrics) => void; }
+type Meter = ChartMeter;
+type SeriesResponse = ChartSeriesResponse;
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
+const ACTIVE_POWER_PHASE_METRICS = [6, 7, 8];
+const REFRESH_INTERVAL_MS = 60_000;
+const MINUTE_MS = 60_000;
+const INTERPOLATION_CONTEXT_MS = 5 * MINUTE_MS;
+function buildSeriesPayload(startMs: number, endMs: number) {
+  return {
+    start_dtm: new Date(startMs).toISOString(), end_dtm: new Date(endMs).toISOString(),
+    series: [{ sources: ['data_lake'], site: [PORT_SITE_ID], site_type: [PORT_PORT_TYPE], device: [],
+      device_type: ['meter'], metric_type: [0], unit: [ACTIVE_POWER_UNIT], field: 'default' }]
+  };
 }
-type Sample = { time: number; watts: number };
+function buildAnchoredPeriodPayload(period: TimePeriod, latestMs: number) {
+  const lastMinute = Math.floor(latestMs / MINUTE_MS) * MINUTE_MS;
+  const start = period === 'today' ? getTodayStartMs() : lastMinute - getTimePeriodMinutes(period) * MINUTE_MS;
+  // Add five preceding minutes for interpolation at the left boundary.
+  return buildSeriesPayload(Math.min(start - INTERPOLATION_CONTEXT_MS, lastMinute), latestMs + MINUTE_MS);
+}
+// Choose the newest minute with complete coverage of the meters that report data.
+// If no minute is complete, use the best-covered recent minute (newest on ties).
+function getLastCommonPowerMinute(data: SeriesResponse, eeDeviceId: number): number | null {
+  const expected = new Map<number, number>();
+  const byMinute = new Map<number, Map<number, number>>();
+  for (const series of data.series ?? []) {
+    const device = Number(series.device), metric = Number(series.metric_type);
+    if (device === eeDeviceId || !ACTIVE_POWER_PHASE_METRICS.includes(metric)) continue;
+    const bit = 1 << ACTIVE_POWER_PHASE_METRICS.indexOf(metric);
+    for (const record of series.records ?? []) {
+      const time = new Date(record[3]).getTime(), watts = Number(record[4]);
+      if (!Number.isFinite(time) || !Number.isFinite(watts)) continue;
+      const minute = Math.floor(time / MINUTE_MS) * MINUTE_MS;
+      expected.set(device, (expected.get(device) ?? 0) | bit);
+      if (!byMinute.has(minute)) byMinute.set(minute, new Map());
+      const coverage = byMinute.get(minute)!;
+      coverage.set(device, (coverage.get(device) ?? 0) | bit);
+    }
+  }
+  if (!byMinute.size) return null;
+  const minutes = [...byMinute.keys()].sort((a, b) => b - a);
+  const latest = minutes[0];
+  const recent = minutes.filter(minute => latest - minute <= 10 * MINUTE_MS);
+  let best = latest, bestCovered = -1;
+  for (const minute of recent) {
+    const coverage = byMinute.get(minute)!;
+    let covered = 0;
+    expected.forEach((mask, id) => {
+      if (((coverage.get(id) ?? 0) & mask) === mask) covered++;
+    });
+    if (covered === expected.size) return minute;
+    if (covered > bestCovered) { bestCovered = covered; best = minute; }
+  }
+  return best;
+}
+function filterLatestPeriod(data: SeriesResponse, period: TimePeriod, end: number): SeriesResponse {
+  const start = period === 'today' ? getTodayStartMs() : end - getTimePeriodMinutes(period) * MINUTE_MS;
+  if (start > end) return { ...data, series: [] };
+  return {
+    ...data, start_dtm: new Date(start).toISOString(), end_dtm: new Date(end).toISOString(),
+    series: (data.series ?? []).map(series => ({
+      ...series, records: (series.records ?? []).filter(record => {
+        const timestamp = new Date(record[3]).getTime();
+        return Number.isFinite(timestamp) && timestamp >= start && timestamp < end + MINUTE_MS;
+      })
+    }))
+  };
+}
+function buildDeviceMinutePower(data: SeriesResponse, eeDeviceId: number) {
+  const devices = new Map<number, Map<number, number>>();
+  for (const series of data.series ?? []) {
+    if (series.device === eeDeviceId ||
+      !ACTIVE_POWER_PHASE_METRICS.includes(series.metric_type)) continue;
+    if (!devices.has(series.device)) devices.set(series.device, new Map());
+    const minuteMap = devices.get(series.device)!;
+    for (const record of series.records ?? []) {
+      const time = new Date(record[3]).getTime();
+      const watts = Number(record[4]);
+      if (!Number.isFinite(time) || !Number.isFinite(watts)) continue;
+      const minute = Math.floor(time / 60_000) * 60_000;
+      minuteMap.set(minute, (minuteMap.get(minute) ?? 0) + watts);
+    }
+  }
+  return devices;
+}
+function calculatePeriodAnalytics(data: SeriesResponse, eeDeviceId: number, meters: Meter[]) {
+  const devices = buildDeviceMinutePower(data, eeDeviceId);
+  const portPower = new Map<number, number>();
+  const contributions = new Map<number, number>();
+  devices.forEach((minuteMap, id) => {
+    let contribution = 0;
+    minuteMap.forEach((watts, minute) => {
+      const positive = Math.max(0, watts);
+      contribution += positive;
+      portPower.set(minute, (portPower.get(minute) ?? 0) + positive);
+    });
+    contributions.set(id, contribution);
+  });
+  let maxPower = 0;
+  portPower.forEach(watts => { if (watts > maxPower) maxPower = watts; });
+  const total = [...contributions.values()].reduce((sum, value) => sum + value, 0);
+  let topId: number | null = null;
+  let topContribution = 0;
+  contributions.forEach((value, id) => {
+    if (value > topContribution) {
+      topId = id;
+      topContribution = value;
+    }
+  });
+  const meter = topId === null ? undefined : meters.find(item => item.id === topId);
+  return {
+    maxPower: maxPower / 1000,
+    topConsumerName: meter
+      ? getMeterDisplayName(meter)
+      : topId !== null ? `Device ${topId}` : 'N/A',
+    topConsumerPercentage: total > 0
+      ? Math.round(topContribution / total * 100) : 0
+  };
+}
 
+type Sample = { time: number; watts: number };
 const PHASE_METRICS = [6, 7, 8];
 const COLORS = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899',
   '#06b6d4', '#fb923c', '#84cc16', '#14b8a6', '#eab308', '#a855f7',
   '#f472b6', '#0ea5e9', '#22c55e', '#f97316', '#a3e635', '#7c3aed', '#db2777'
 ];
-
 function getMeterName(meter?: ChartMeter, id?: number): string {
   if (!meter) return id !== undefined ? `Device ${id}` : 'Unknown device';
   if (meter.extra) {
@@ -59,7 +172,6 @@ function getMeterName(meter?: ChartMeter, id?: number): string {
   }
   return meter.name || `Device ${meter.id}`;
 }
-
 function getMeterDisplayName(meter?: ChartMeter, id?: number): string {
   if (!meter) return id !== undefined ? `Device ${id}` : 'Unknown device';
   const friendlyName = getMeterName(meter);
@@ -67,7 +179,6 @@ function getMeterDisplayName(meter?: ChartMeter, id?: number): string {
     ? `${meter.name} • ${friendlyName}`
     : meter.name;
 }
-
 function getDeviceColor(name: string) {
   let hash = 0;
   for (let i = 0; i < name.length; i++)
@@ -75,19 +186,16 @@ function getDeviceColor(name: string) {
   const border = COLORS[Math.abs(hash) % COLORS.length];
   return { border, bg: `${border}cc` };
 }
-
 function interpolateSamples(samples: Sample[], timestamps: number[]): (number | null)[] {
   const sorted = [...samples].sort((a, b) => a.time - b.time);
   const readings = [...new Map(sorted.map(sample => [sample.time, sample])).values()];
   const MAX_GAP_MS = 5 * 60_000;
   const MAX_FORWARD_FILL_MS = 2 * 60_000;
   let index = 0;
-
   return timestamps.map(time => {
     while (index < readings.length && readings[index].time < time) index++;
     const next = readings[index];
     if (next?.time === time) return next.watts / 1000;
-
     const previous = readings[index - 1];
     if (!previous) return null;
     if (!next) {
@@ -96,7 +204,6 @@ function interpolateSamples(samples: Sample[], timestamps: number[]): (number | 
         ? previous.watts / 1000
         : null;
     }
-
     const gap = next.time - previous.time;
     if (gap <= 0 || gap > MAX_GAP_MS) return null;
     return (
@@ -104,28 +211,106 @@ function interpolateSamples(samples: Sample[], timestamps: number[]): (number | 
     ) / 1000;
   });
 }
-
-export default function PowerChart({
-  meters, periodData, timePeriod, loading
-}: PowerChartProps) {
+export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartProps) {
   const t = useTranslation();
+  const router = useRouter();
+  const [meters, setMeters] = useState<ChartMeter[]>([]);
+  const [periodData, setPeriodData] = useState<ChartSeriesResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [requestPeriod, setRequestPeriod] = useState<TimePeriod | null>(null);
+  const [analytics, setAnalytics] = useState({ maxPower: 0, topConsumerName: 'N/A', topConsumerPercentage: 0 });
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadMeters() {
+      const token = authService.getToken();
+      if (!token) { authService.logout(); router.replace('/login'); return; }
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/meters`, { headers: { Accept: 'application/json', Authorization: `${authService.getTokenType()} ${token}` }, signal: controller.signal, cache: 'no-store' });
+        if (response.status === 401) { authService.logout(); router.replace('/login'); return; }
+        if (!response.ok) throw new Error(`Meters API ${response.status}`);
+        const data = await response.json() as ChartMeter[];
+        if (!controller.signal.aborted) { setMeters(data); setError(null); }
+      } catch (err) {
+        if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : 'Failed to load meters'); setLoading(false); }
+      }
+    }
+    void loadMeters();
+    return () => controller.abort();
+  }, [router]);
+  useEffect(() => {
+    if (!meters.length) return;
+    const eeMeter = meters.find(m => m.tags?.includes(EE_TAG_ID));
+    if (!eeMeter) { setError('Energy entrance meter not found'); setLoading(false); return; }
+    const controller = new AbortController();
+    let inFlight = false;
+    setRequestPeriod(timePeriod); setLoading(true); setPeriodData(null); setError(null);
+    async function loadPeriod() {
+      if (inFlight || controller.signal.aborted) return;
+      inFlight = true;
+      const token = authService.getToken();
+      if (!token) { authService.logout(); router.replace('/login'); inFlight = false; return; }
+      try {
+        const url = `${BACKEND_URL}/api/series/data_lake`;
+        const headers = { Accept: 'application/json', Authorization: `${authService.getTokenType()} ${token}`, 'Content-Type': 'application/json' };
+        async function fetchSeries(payload: ReturnType<typeof buildSeriesPayload>): Promise<ChartSeriesResponse> {
+          const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload), signal: controller.signal, cache: 'no-store' });
+          if (response.status === 401) { authService.logout(); router.replace('/login'); throw new Error('Unauthorized'); }
+          if (!response.ok) throw new Error(`Analytics API ${response.status}: ${(await response.text()).slice(0, 300)}`);
+          return await response.json() as ChartSeriesResponse;
+        }
+        // 1. Discover the most recent meter reading, irrespective of the selected period.
+        // Short probe first; expand to one day only when no meter readings are found.
+        const nowMs = Date.now();
+        let probe = await fetchSeries(buildSeriesPayload(nowMs - 2 * 60 * MINUTE_MS, nowMs));
+        let latestMs = getLastCommonPowerMinute(probe, eeMeter.id);
+        if (latestMs === null) {
+          probe = await fetchSeries(buildSeriesPayload(nowMs - 24 * 60 * MINUTE_MS, nowMs));
+          latestMs = getLastCommonPowerMinute(probe, eeMeter.id);
+        }
+        if (controller.signal.aborted) return;
+        if (latestMs === null) { setPeriodData({ series: [] }); setError(null); return; }
+        // 2. Request the full X-hour window from the last recorded timestamp, not Date.now().
+        const data = await fetchSeries(buildAnchoredPeriodPayload(timePeriod, latestMs));
+        if (controller.signal.aborted) return;
+        const filtered = filterLatestPeriod(data, timePeriod, latestMs);
+        const result = calculatePeriodAnalytics(filtered, eeMeter.id, meters);
+        setPeriodData(filtered);
+        setAnalytics({ maxPower: Math.round(result.maxPower * 100) / 100, topConsumerName: result.topConsumerName, topConsumerPercentage: result.topConsumerPercentage });
+        setError(null);
+      } catch (err) {
+        if (!controller.signal.aborted) setError(err instanceof Error ? err.message : 'Failed to load power chart');
+      } finally {
+        inFlight = false;
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    void loadPeriod();
+    const interval = window.setInterval(() => void loadPeriod(), REFRESH_INTERVAL_MS);
+    return () => { controller.abort(); window.clearInterval(interval); };
+  }, [meters, timePeriod, router]);
+  const isLoading = loading || requestPeriod !== timePeriod;
+  useEffect(() => {
+    onMetricsChange?.({ ...analytics, loading: isLoading, error });
+  }, [analytics, isLoading, error, onMetricsChange]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [hiddenIds, setHiddenIds] = useState<number[]>([]);
+  // A new time window starts with every legend item visible.
+  useEffect(() => { setHiddenIds([]); }, [timePeriod]);
   const initialized = useRef(false);
   const selectRef = useRef<HTMLDetailsElement>(null);
-
   const eeDeviceId = useMemo(
     () => meters.find(m => m.tags?.includes(EE_TAG_ID))?.id,
     [meters]
   );
-
+  const visiblePeriodData = requestPeriod === timePeriod ? periodData : null;
   const availableMeters = useMemo(() => {
-    if (!periodData?.series?.length) return [];
-    const ids = new Set(periodData.series.filter(s =>
+    if (!visiblePeriodData?.series?.length) return [];
+    const ids = new Set(visiblePeriodData.series.filter(s =>
       s.device !== eeDeviceId && PHASE_METRICS.includes(s.metric_type)
     ).map(s => s.device));
     return meters.filter(m => ids.has(m.id)).sort((a, b) => a.id - b.id);
-  }, [periodData, meters, eeDeviceId]);
-
+  }, [visiblePeriodData, meters, eeDeviceId]);
   useEffect(() => {
     if (!availableMeters.length) return;
     const ids = availableMeters.map(m => m.id);
@@ -136,7 +321,6 @@ export default function PowerChart({
       setSelectedIds(current => current.filter(id => ids.includes(id)));
     }
   }, [availableMeters]);
-
   useEffect(() => {
     const close = (event: PointerEvent) => {
       if (selectRef.current && !selectRef.current.contains(event.target as Node))
@@ -145,72 +329,60 @@ export default function PowerChart({
     document.addEventListener('pointerdown', close);
     return () => document.removeEventListener('pointerdown', close);
   }, []);
-
-  const toggleMeter = (id: number) => setSelectedIds(current =>
-    current.includes(id)
-      ? current.filter(value => value !== id)
-      : [...current, id]
-  );
-
+  const toggleMeter = (id: number) => {
+    setSelectedIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
+    setHiddenIds([]);
+  };
+  const toggleLegend = (id: number) => setHiddenIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
   const chartData = useMemo(() => {
     const empty = { labels: [] as Date[], datasets: [] };
-    if (!periodData?.series?.length || !selectedIds.length || eeDeviceId === undefined)
+    if (!visiblePeriodData?.series?.length || !selectedIds.length || eeDeviceId === undefined)
       return empty;
-
     const selected = new Set(selectedIds);
     const devices = new Map<number, Map<number, Sample[]>>();
     let latestTime = -Infinity;
-
     // Find the latest available time from all device power records.
     // The selected devices must not change the time window.
-    for (const series of periodData.series) {
+    for (const series of visiblePeriodData.series) {
       const deviceId = Number(series.device);
       const phase = Number(series.metric_type);
       if (deviceId === eeDeviceId || !PHASE_METRICS.includes(phase)) continue;
-
       if (selected.has(deviceId)) {
         if (!devices.has(deviceId)) devices.set(deviceId, new Map());
         const phases = devices.get(deviceId)!;
         if (!phases.has(phase)) phases.set(phase, []);
       }
-
       for (const record of series.records ?? []) {
         const time = new Date(record[3]).getTime();
         const watts = Number(record[4]);
         if (!Number.isFinite(time) || !Number.isFinite(watts)) continue;
         if (time > latestTime) latestTime = time;
-
         if (selected.has(deviceId)) {
           devices.get(deviceId)!.get(phase)!.push({ time, watts });
         }
       }
     }
-
     if (!Number.isFinite(latestTime)) return empty;
-
     const minuteMs = 60_000;
     const stepMs = getChartStepMs(timePeriod);
     const minutesPerPoint = stepMs / minuteMs;
-    const end = Math.floor(latestTime / minuteMs) * minuteMs;
+    const anchor = visiblePeriodData.end_dtm ? new Date(visiblePeriodData.end_dtm).getTime() : NaN;
+    const end = Number.isFinite(anchor) ? Math.floor(anchor / minuteMs) * minuteMs : Math.floor(latestTime / minuteMs) * minuteMs;
     const start = timePeriod === 'today'
       ? getTodayStartMs()
       : end - getTimePeriodMinutes(timePeriod) * minuteMs;
-
     if (start > end) return empty;
-
     const minuteTimestamps: number[] = [];
     // Each timestamp represents the corresponding one-minute reading.
     for (let time = start + minuteMs; time <= end; time += minuteMs) {
       minuteTimestamps.push(time);
     }
     if (!minuteTimestamps.length) return empty;
-
     // One label for every complete interval, plus its final partial interval.
     const displayTimestamps = minuteTimestamps.filter((_, index) =>
       (index + 1) % minutesPerPoint === 0 ||
       index === minuteTimestamps.length - 1
     );
-
     const datasets = [...devices.entries()]
       .sort(([a], [b]) => a - b)
       .map(([deviceId, phases]) => {
@@ -219,7 +391,6 @@ export default function PowerChart({
         const phaseData = [...phases.values()].map(samples =>
           interpolateSamples(samples, minuteTimestamps)
         );
-
         // Sum all phases first, then aggregate the device power.
         const minutePower = minuteTimestamps.map((_, index) => {
           const values = phaseData.map(phase => phase[index]);
@@ -231,8 +402,8 @@ export default function PowerChart({
             values.reduce<number>((sum, value) => sum + (value ?? 0), 0)
           );
         });
-
         return {
+          deviceId,
           label: name,
           data: aggregateMinuteValues(minutePower, stepMs),
           backgroundColor: color.bg,
@@ -248,13 +419,40 @@ export default function PowerChart({
           spanGaps: false
         };
       });
-
     return {
       labels: displayTimestamps.map(time => new Date(time)),
       datasets
     };
-  }, [periodData, selectedIds, eeDeviceId, timePeriod, meters]);
-
+  }, [visiblePeriodData, selectedIds, eeDeviceId, timePeriod, meters]);
+  const visibleChartData = useMemo(() => ({
+    ...chartData, datasets: chartData.datasets.filter(dataset => !hiddenIds.includes(dataset.deviceId))
+  }), [chartData, hiddenIds]);
+  // Today always occupies the entire local day; data remains limited to the last recorded minute.
+  const chartBounds = useMemo(() => {
+    if (timePeriod === 'today') {
+      const start = getTodayStartMs();
+      const tomorrow = new Date(start);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return { min: start, max: tomorrow.getTime() - MINUTE_MS };
+    }
+    if (!chartData.labels.length) return { min: undefined, max: undefined };
+    const first = chartData.labels[0].getTime();
+    const last = chartData.labels[chartData.labels.length - 1].getTime();
+    return { min: first - getChartStepMs(timePeriod), max: last };
+  }, [chartData.labels, timePeriod]);
+  // Dynamic axis ceiling: maximum stacked power across timestamps + at least 10 kW.
+  const maxPowerAxis = useMemo(() => {
+    let maximum = 0;
+    for (let i = 0; i < chartData.labels.length; i++) {
+      let total = 0;
+      for (const dataset of visibleChartData.datasets) {
+        const value = dataset.data[i];
+        if (typeof value === 'number' && Number.isFinite(value) && value > 0) total += value;
+      }
+      maximum = Math.max(maximum, total);
+    }
+    return Math.ceil(maximum / 10) * 10 + 10;
+  }, [chartData, visibleChartData]);
   const chartOptions = useMemo<ChartOptions<'line'>>(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -262,7 +460,7 @@ export default function PowerChart({
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: {
-        display: true,
+        display: false,
         position: 'bottom',
         labels: {
           boxWidth: 10,
@@ -349,8 +547,10 @@ export default function PowerChart({
       x: {
         type: 'time',
         stacked: false,
-        offset: true,
-        min: timePeriod === 'today' ? getTodayStartMs() : undefined,
+        offset: false,
+        bounds: 'data',
+        min: chartBounds.min,
+        max: chartBounds.max,
         time: {
           unit: timePeriod === '1hour' || timePeriod === '3hours'
             ? 'minute'
@@ -361,6 +561,7 @@ export default function PowerChart({
         },
         grid: { display: false },
         ticks: {
+          source: 'auto',
           maxRotation: 0,
           autoSkip: true,
           maxTicksLimit: 8,
@@ -372,10 +573,14 @@ export default function PowerChart({
       y: {
         stacked: true,
         beginAtZero: true,
-        suggestedMin: 0,
+        min: 0,
+        max: maxPowerAxis,
+        afterFit: axis => { axis.width = 75; },
         grid: { color: 'rgba(0, 0, 0, 0.08)' },
         ticks: {
-          callback: value => Number(value) < 0 ? '' : `${value} kW`,
+          stepSize: 10,
+          autoSkip: false,
+          callback: value => `${value} kW`,
           color: '#6b7280',
           padding: 8,
           font: { size: 11 }
@@ -384,8 +589,7 @@ export default function PowerChart({
       }
     },
     elements: { line: { tension: 0 } }
-  }), [timePeriod, t.kW]);
-
+  }), [timePeriod, t.kW, chartBounds, maxPowerAxis]);
   const selectedLabel = !selectedIds.length
     ? t.selectDevices
     : selectedIds.length === 1
@@ -394,7 +598,6 @@ export default function PowerChart({
           selectedIds[0]
         )
       : `${selectedIds.length} ${t.devicesSelected}`;
-
   const periodLabels: Record<TimePeriod, string> = {
     '1hour': t.lastHour,
     '3hours': t.last3Hours,
@@ -403,12 +606,11 @@ export default function PowerChart({
     '24hours': 'Last 24 Hours',
     'today': 'Today'
   };
-
   const hasData = chartData.datasets.some(dataset =>
     dataset.data.some(value => value !== null)
   );
-
   return (
+    <>
     <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 p-6 shadow-lg dark:border-gray-700 dark:from-gray-800 dark:to-gray-900">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <h3 className="flex items-center text-xl font-semibold text-gray-800 dark:text-gray-200">
@@ -426,12 +628,12 @@ export default function PowerChart({
           <div className="absolute right-0 z-50 mt-2 w-[340px] rounded-lg border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-600 dark:bg-gray-800">
             <div className="mb-2 flex items-center justify-between border-b border-gray-200 pb-2 dark:border-gray-700">
               <button type="button"
-                onClick={() => setSelectedIds(availableMeters.map(m => m.id))}
+                onClick={() => { setSelectedIds(availableMeters.map(m => m.id)); setHiddenIds([]); }}
                 className="text-sm font-medium text-blue-600 hover:text-blue-700">
                 {t.selectAll}
               </button>
               <button type="button"
-                onClick={() => setSelectedIds([])}
+                onClick={() => { setSelectedIds([]); setHiddenIds([]); }}
                 className="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400">
                 {t.clear}
               </button>
@@ -455,27 +657,44 @@ export default function PowerChart({
           </div>
         </details>
       </div>
-
-      <div className="h-96">
-        {loading ? (
+      <div className="h-80 min-w-0">
+        {isLoading ? (
           <div className="flex h-full items-center justify-center gap-2">
             <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-500" />
             <span className="text-gray-500 dark:text-gray-400">
               {t.loadingData}
             </span>
           </div>
+        ) : error ? (
+          <div className="flex h-full items-center justify-center text-red-600">{error}</div>
         ) : !selectedIds.length ? (
           <div className="flex h-full items-center justify-center text-gray-500 dark:text-gray-400">
             {t.noDevicesSelected}
           </div>
         ) : hasData ? (
-          <Line data={chartData} options={chartOptions} />
+          <Line data={visibleChartData} options={chartOptions} />
         ) : (
           <div className="flex h-full items-center justify-center text-gray-500 dark:text-gray-400">
             {t.noDataAvailable}
           </div>
         )}
       </div>
+      <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5" aria-label="Device legend">
+        {availableMeters.filter(meter => selectedIds.includes(meter.id)).map(meter => {
+          const name = getMeterName(meter, meter.id);
+          const color = getDeviceColor(name);
+          const hidden = hiddenIds.includes(meter.id);
+          return (
+            <button key={meter.id} type="button" onClick={() => toggleLegend(meter.id)}
+              title={getMeterDisplayName(meter)} aria-pressed={!hidden}
+              className={`inline-flex shrink-0 items-center gap-1 text-[10px] leading-tight transition-opacity hover:opacity-70 ${hidden ? 'text-gray-400 line-through dark:text-gray-500' : 'text-gray-600 dark:text-gray-300'}`}>
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: hidden ? '#d1d5db' : color.border }} />
+              <span>{name}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
+    </>
   );
 }

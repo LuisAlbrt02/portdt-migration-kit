@@ -3,20 +3,14 @@
 import { Clock } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 
-export type TimePeriod = '1hour' | '3hours' | '6hours' | '12hours' | '24hours' | 'today';
-
+export type TimePeriod = 'today' | '1hour' | '3hours' | '6hours' | '12hours' | '24hours';
 const MADEIRA_TIMEZONE = 'Atlantic/Madeira';
 
 function getMadeiraDateParts(timestamp: number) {
   const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: MADEIRA_TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23'
+    timeZone: MADEIRA_TIMEZONE, year: 'numeric', month: '2-digit',
+    day: '2-digit', hour: '2-digit', minute: '2-digit',
+    second: '2-digit', hourCycle: 'h23'
   }).formatToParts(new Date(timestamp));
   const get = (type: string) => Number(parts.find(part => part.type === type)?.value ?? 0);
   return {
@@ -25,7 +19,7 @@ function getMadeiraDateParts(timestamp: number) {
   };
 }
 
-// Midnight in Madeira, independently of the browser timezone
+// Midnight in Madeira, independently of the browser timezone.
 export function getTodayStartMs(): number {
   const now = Date.now();
   const { year, month, day } = getMadeiraDateParts(now);
@@ -39,6 +33,19 @@ export function getTodayStartMs(): number {
   return midnightUTC - offset;
 }
 
+// End of the current Madeira day, accounting for daylight saving time.
+export function getTodayEndMs(): number {
+  const start = getTodayStartMs();
+  const { year, month, day } = getMadeiraDateParts(start + 12 * 60 * 60_000);
+  const nextDay = new Date(Date.UTC(year, month - 1, day + 1));
+  const nextParts = getMadeiraDateParts(nextDay.getTime());
+  const localAsUTC = Date.UTC(
+    nextParts.year, nextParts.month - 1, nextParts.day,
+    nextParts.hour, nextParts.minute, nextParts.second
+  );
+  return nextDay.getTime() - (localAsUTC - nextDay.getTime()) - 60_000;
+}
+
 export function getTimePeriodMinutes(period: TimePeriod): number {
   switch (period) {
     case '1hour': return 60;
@@ -50,21 +57,16 @@ export function getTimePeriodMinutes(period: TimePeriod): number {
   }
 }
 
-export function getChartStepMs(period: TimePeriod): number {
+export function getChartStepMs(_period: TimePeriod): number {
   return 60_000;
 }
 
-export function aggregateMinuteValues(
-  values: (number | null)[],
-  stepMs: number
-): (number | null)[] {
+export function aggregateMinuteValues(values: (number | null)[], stepMs: number): (number | null)[] {
   const minutesPerPoint = Math.max(1, Math.round(stepMs / 60_000));
   if (minutesPerPoint === 1) return values;
-
   const result: (number | null)[] = [];
   for (let i = 0; i < values.length; i += minutesPerPoint) {
     const group = values.slice(i, i + minutesPerPoint);
-    // Do not average incomplete or missing minute values.
     if (group.some(value => value === null || !Number.isFinite(value))) {
       result.push(null);
       continue;
@@ -83,12 +85,12 @@ interface TimeSelectorProps {
 export default function TimeSelector({ value, onChange, disabled = false }: TimeSelectorProps) {
   const t = useTranslation();
   const options: { value: TimePeriod; label: string }[] = [
+    { value: 'today', label: 'Today' },
     { value: '1hour', label: t.lastHour },
     { value: '3hours', label: t.last3Hours },
     { value: '6hours', label: t.last6Hours },
     { value: '12hours', label: 'Last 12 Hours' },
-    { value: '24hours', label: 'Last 24 Hours' },
-    { value: 'today', label: 'Today' }
+    { value: '24hours', label: 'Last 24 Hours' }
   ];
 
   return (
@@ -99,17 +101,12 @@ export default function TimeSelector({ value, onChange, disabled = false }: Time
       </label>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         {options.map(option => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onChange(option.value)}
-            disabled={disabled}
+          <button key={option.value} type="button" onClick={() => onChange(option.value)} disabled={disabled}
             className={`rounded-lg border-2 px-3 py-2 font-medium transition-all duration-200 ${
               value === option.value
                 ? 'border-blue-600 bg-blue-600 text-white shadow-md'
                 : 'border-gray-200 bg-white text-gray-700 hover:border-blue-600 hover:shadow-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'
-            } ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
-          >
+            } ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}>
             <span className="text-sm">{option.label}</span>
           </button>
         ))}
