@@ -15,32 +15,46 @@ import {
   type TimePeriod, getChartStepMs, getTimePeriodMinutes,
   getTodayStartMs, aggregateMinuteValues
 } from './TimeSelector';
+
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, TimeScale, Tooltip, Legend, Filler);
+
 export interface ChartMeter {
   id: number;
   name: string;
   tags: number[];
   extra?: string | { friendlyName?: string } | null;
 }
+
 export interface ChartSeriesItem {
   device: number;
   metric_type: number;
   records: [number, number, number, string, number][];
 }
+
 export interface ChartSeriesResponse {
   start_dtm?: string | null;
   end_dtm?: string | null;
   series: ChartSeriesItem[];
 }
+
 export interface PowerChartMetrics { maxPower: number; topConsumerName: string; topConsumerPercentage: number; loading: boolean; error: string | null; }
+
 interface PowerChartProps { timePeriod: TimePeriod; onMetricsChange?: (metrics: PowerChartMetrics) => void; }
+
 type Meter = ChartMeter;
+
 type SeriesResponse = ChartSeriesResponse;
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
+
 const ACTIVE_POWER_PHASE_METRICS = [6, 7, 8];
+
 const REFRESH_INTERVAL_MS = 60_000;
+
 const MINUTE_MS = 60_000;
+
 const INTERPOLATION_CONTEXT_MS = 5 * MINUTE_MS;
+
 function buildSeriesPayload(startMs: number, endMs: number) {
   return {
     start_dtm: new Date(startMs).toISOString(), end_dtm: new Date(endMs).toISOString(),
@@ -48,12 +62,15 @@ function buildSeriesPayload(startMs: number, endMs: number) {
       device_type: ['meter'], metric_type: [0], unit: [ACTIVE_POWER_UNIT], field: 'default' }]
   };
 }
+
 function buildAnchoredPeriodPayload(period: TimePeriod, latestMs: number) {
   const lastMinute = Math.floor(latestMs / MINUTE_MS) * MINUTE_MS;
   const start = period === 'today' ? getTodayStartMs() : lastMinute - getTimePeriodMinutes(period) * MINUTE_MS;
+
   // Add five preceding minutes for interpolation at the left boundary.
   return buildSeriesPayload(Math.min(start - INTERPOLATION_CONTEXT_MS, lastMinute), latestMs + MINUTE_MS);
 }
+
 // Choose the newest minute with complete coverage of the meters that report data.
 // If no minute is complete, use the best-covered recent minute (newest on ties).
 function getLastCommonPowerMinute(data: SeriesResponse, eeDeviceId: number): number | null {
@@ -89,7 +106,8 @@ function getLastCommonPowerMinute(data: SeriesResponse, eeDeviceId: number): num
   }
   return best;
 }
-function filterLatestPeriod(data: SeriesResponse, period: TimePeriod, end: number): SeriesResponse {
+
+function filterLatestPeriod(data: SeriesResponse, period: TimePeriod, end: number, contextMs = 0): SeriesResponse {
   const start = period === 'today' ? getTodayStartMs() : end - getTimePeriodMinutes(period) * MINUTE_MS;
   if (start > end) return { ...data, series: [] };
   return {
@@ -97,11 +115,12 @@ function filterLatestPeriod(data: SeriesResponse, period: TimePeriod, end: numbe
     series: (data.series ?? []).map(series => ({
       ...series, records: (series.records ?? []).filter(record => {
         const timestamp = new Date(record[3]).getTime();
-        return Number.isFinite(timestamp) && timestamp >= start && timestamp < end + MINUTE_MS;
+        return Number.isFinite(timestamp) && timestamp >= start - contextMs && timestamp < end + MINUTE_MS;
       })
     }))
   };
 }
+
 function buildDeviceMinutePower(data: SeriesResponse, eeDeviceId: number) {
   const devices = new Map<number, Map<number, number>>();
   for (const series of data.series ?? []) {
@@ -119,6 +138,7 @@ function buildDeviceMinutePower(data: SeriesResponse, eeDeviceId: number) {
   }
   return devices;
 }
+
 function calculatePeriodAnalytics(data: SeriesResponse, eeDeviceId: number, meters: Meter[]) {
   const devices = buildDeviceMinutePower(data, eeDeviceId);
   const portPower = new Map<number, number>();
@@ -155,12 +175,15 @@ function calculatePeriodAnalytics(data: SeriesResponse, eeDeviceId: number, mete
 }
 
 type Sample = { time: number; watts: number };
+
 const PHASE_METRICS = [6, 7, 8];
+
 const COLORS = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899',
   '#06b6d4', '#fb923c', '#84cc16', '#14b8a6', '#eab308', '#a855f7',
   '#f472b6', '#0ea5e9', '#22c55e', '#f97316', '#a3e635', '#7c3aed', '#db2777'
 ];
+
 function getMeterName(meter?: ChartMeter, id?: number): string {
   if (!meter) return id !== undefined ? `Device ${id}` : 'Unknown device';
   if (meter.extra) {
@@ -172,6 +195,7 @@ function getMeterName(meter?: ChartMeter, id?: number): string {
   }
   return meter.name || `Device ${meter.id}`;
 }
+
 function getMeterDisplayName(meter?: ChartMeter, id?: number): string {
   if (!meter) return id !== undefined ? `Device ${id}` : 'Unknown device';
   const friendlyName = getMeterName(meter);
@@ -179,6 +203,7 @@ function getMeterDisplayName(meter?: ChartMeter, id?: number): string {
     ? `${meter.name} • ${friendlyName}`
     : meter.name;
 }
+
 function getDeviceColor(name: string) {
   let hash = 0;
   for (let i = 0; i < name.length; i++)
@@ -186,6 +211,7 @@ function getDeviceColor(name: string) {
   const border = COLORS[Math.abs(hash) % COLORS.length];
   return { border, bg: `${border}cc` };
 }
+
 function interpolateSamples(samples: Sample[], timestamps: number[]): (number | null)[] {
   const sorted = [...samples].sort((a, b) => a.time - b.time);
   const readings = [...new Map(sorted.map(sample => [sample.time, sample])).values()];
@@ -211,6 +237,7 @@ function interpolateSamples(samples: Sample[], timestamps: number[]): (number | 
     ) / 1000;
   });
 }
+
 export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartProps) {
   const t = useTranslation();
   const router = useRouter();
@@ -220,6 +247,7 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
   const [error, setError] = useState<string | null>(null);
   const [requestPeriod, setRequestPeriod] = useState<TimePeriod | null>(null);
   const [analytics, setAnalytics] = useState({ maxPower: 0, topConsumerName: 'N/A', topConsumerPercentage: 0 });
+
   useEffect(() => {
     const controller = new AbortController();
     async function loadMeters() {
@@ -238,6 +266,7 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
     void loadMeters();
     return () => controller.abort();
   }, [router]);
+
   useEffect(() => {
     if (!meters.length) return;
     const eeMeter = meters.find(m => m.tags?.includes(EE_TAG_ID));
@@ -274,8 +303,9 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
         const data = await fetchSeries(buildAnchoredPeriodPayload(timePeriod, latestMs));
         if (controller.signal.aborted) return;
         const filtered = filterLatestPeriod(data, timePeriod, latestMs);
+        const chartFiltered = filterLatestPeriod(data, timePeriod, latestMs, INTERPOLATION_CONTEXT_MS);
         const result = calculatePeriodAnalytics(filtered, eeMeter.id, meters);
-        setPeriodData(filtered);
+        setPeriodData(chartFiltered);
         setAnalytics({ maxPower: Math.round(result.maxPower * 100) / 100, topConsumerName: result.topConsumerName, topConsumerPercentage: result.topConsumerPercentage });
         setError(null);
       } catch (err) {
@@ -289,21 +319,27 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
     const interval = window.setInterval(() => void loadPeriod(), REFRESH_INTERVAL_MS);
     return () => { controller.abort(); window.clearInterval(interval); };
   }, [meters, timePeriod, router]);
+
   const isLoading = loading || requestPeriod !== timePeriod;
+
   useEffect(() => {
     onMetricsChange?.({ ...analytics, loading: isLoading, error });
   }, [analytics, isLoading, error, onMetricsChange]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [hiddenIds, setHiddenIds] = useState<number[]>([]);
+
   // A new time window starts with every legend item visible.
   useEffect(() => { setHiddenIds([]); }, [timePeriod]);
   const initialized = useRef(false);
   const selectRef = useRef<HTMLDetailsElement>(null);
+
   const eeDeviceId = useMemo(
     () => meters.find(m => m.tags?.includes(EE_TAG_ID))?.id,
     [meters]
   );
+
   const visiblePeriodData = requestPeriod === timePeriod ? periodData : null;
+
   const availableMeters = useMemo(() => {
     if (!visiblePeriodData?.series?.length) return [];
     const ids = new Set(visiblePeriodData.series.filter(s =>
@@ -311,6 +347,7 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
     ).map(s => s.device));
     return meters.filter(m => ids.has(m.id)).sort((a, b) => a.id - b.id);
   }, [visiblePeriodData, meters, eeDeviceId]);
+
   useEffect(() => {
     if (!availableMeters.length) return;
     const ids = availableMeters.map(m => m.id);
@@ -321,6 +358,7 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
       setSelectedIds(current => current.filter(id => ids.includes(id)));
     }
   }, [availableMeters]);
+
   useEffect(() => {
     const close = (event: PointerEvent) => {
       if (selectRef.current && !selectRef.current.contains(event.target as Node))
@@ -329,11 +367,14 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
     document.addEventListener('pointerdown', close);
     return () => document.removeEventListener('pointerdown', close);
   }, []);
+
   const toggleMeter = (id: number) => {
     setSelectedIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
     setHiddenIds([]);
   };
+
   const toggleLegend = (id: number) => setHiddenIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
+
   const chartData = useMemo(() => {
     const empty = { labels: [] as Date[], datasets: [] };
     if (!visiblePeriodData?.series?.length || !selectedIds.length || eeDeviceId === undefined)
@@ -374,7 +415,7 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
     if (start > end) return empty;
     const minuteTimestamps: number[] = [];
     // Each timestamp represents the corresponding one-minute reading.
-    for (let time = start + minuteMs; time <= end; time += minuteMs) {
+    for (let time = start; time <= end; time += minuteMs) {
       minuteTimestamps.push(time);
     }
     if (!minuteTimestamps.length) return empty;
@@ -424,9 +465,11 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
       datasets
     };
   }, [visiblePeriodData, selectedIds, eeDeviceId, timePeriod, meters]);
+
   const visibleChartData = useMemo(() => ({
     ...chartData, datasets: chartData.datasets.filter(dataset => !hiddenIds.includes(dataset.deviceId))
   }), [chartData, hiddenIds]);
+
   // Today always occupies the entire local day; data remains limited to the last recorded minute.
   const chartBounds = useMemo(() => {
     if (timePeriod === 'today') {
@@ -436,10 +479,10 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
       return { min: start, max: tomorrow.getTime() - MINUTE_MS };
     }
     if (!chartData.labels.length) return { min: undefined, max: undefined };
-    const first = chartData.labels[0].getTime();
-    const last = chartData.labels[chartData.labels.length - 1].getTime();
-    return { min: first - getChartStepMs(timePeriod), max: last };
+    const end = chartData.labels[chartData.labels.length - 1].getTime();
+    return { min: end - getTimePeriodMinutes(timePeriod) * MINUTE_MS, max: end };
   }, [chartData.labels, timePeriod]);
+
   // Dynamic axis ceiling: maximum stacked power across timestamps + at least 10 kW.
   const maxPowerAxis = useMemo(() => {
     let maximum = 0;
@@ -453,6 +496,7 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
     }
     return Math.ceil(maximum / 10) * 10 + 10;
   }, [chartData, visibleChartData]);
+
   const chartOptions = useMemo<ChartOptions<'line'>>(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -561,7 +605,7 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
         },
         grid: { display: false },
         ticks: {
-          source: 'auto',
+          source: 'data',
           maxRotation: 0,
           autoSkip: true,
           maxTicksLimit: 8,
@@ -590,6 +634,7 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
     },
     elements: { line: { tension: 0 } }
   }), [timePeriod, t.kW, chartBounds, maxPowerAxis]);
+
   const selectedLabel = !selectedIds.length
     ? t.selectDevices
     : selectedIds.length === 1
@@ -598,6 +643,7 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
           selectedIds[0]
         )
       : `${selectedIds.length} ${t.devicesSelected}`;
+
   const periodLabels: Record<TimePeriod, string> = {
     '1hour': t.lastHour,
     '3hours': t.last3Hours,
@@ -606,9 +652,11 @@ export default function PowerChart({ timePeriod, onMetricsChange }: PowerChartPr
     '24hours': 'Last 24 Hours',
     'today': 'Today'
   };
+
   const hasData = chartData.datasets.some(dataset =>
     dataset.data.some(value => value !== null)
   );
+
   return (
     <>
     <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 p-6 shadow-lg dark:border-gray-700 dark:from-gray-800 dark:to-gray-900">
